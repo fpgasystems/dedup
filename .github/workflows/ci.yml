@@ -18,6 +18,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y verilator
+          export PROJ_PATH=$(pwd)
+          cd .. && git clone https://github.com/SpinalHDL/SpinalCrypto.git && cd SpinalCrypto && sbt publishLocal && cd $PROJ_PATH
           ./run.sh
       - name: Setup tmate session
         if: ${{ failure() }}
