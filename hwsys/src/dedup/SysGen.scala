@@ -16,18 +16,18 @@ object GenDefault {
   // import config if exists
   def main(args: Array[String]): Unit =
     MySpinalConfig.generateVerilog {
-      val top = new SHA3Core_Std(SHA3_512)
+      val top = new SHA3Core_Std(SHA3_256)
       top.setDefinitionName("dedup_default")
       top
     }
 }
 
-object GenSHA256 {
+object GenBloomFilterCRC {
   // import config if exists
   def main(args: Array[String]): Unit =
     MySpinalConfig.generateVerilog {
-      val top = new SHA3Core_Std(SHA3_256, dataWidth = 512 bits)
-      top.setDefinitionName("dedup_sha256")
+      val top = new BloomFilterCRC()
+      top.setDefinitionName("dedup_bloomfiltercrc")
       top
     }
 }
