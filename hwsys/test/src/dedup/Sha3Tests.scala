@@ -15,8 +15,8 @@ class Sha3Tests extends AnyFunSuite {
   val NBR_ITERATION = 100
 
   test("Test: SHA3 512"){
-    val compiledRTL = if(sys.env.contains("VCS_HOME")) SimConfig.withConfig(SpinalConfig(inlineRom = true)).withWave.compile(new SHA3Core_Std(SHA3_512))
-    else SimConfig.withConfig(SpinalConfig(inlineRom = true)).withVpdWave.withVCS.compile(new SHA3Core_Std(SHA3_512))
+    val compiledRTL = if(sys.env.contains("VCS_HOME")) SimConfig.withConfig(SpinalConfig(inlineRom = true)).withVpdWave.withVCS.compile(new SHA3Core_Std(SHA3_512))
+    else SimConfig.withConfig(SpinalConfig(inlineRom = true)).withWave.compile(new SHA3Core_Std(SHA3_512))
     compiledRTL.doSim { dut =>
       dut.clockDomain.forkStimulus(2)
       HashIOsim.initializeIO(dut.io)
@@ -29,8 +29,8 @@ class Sha3Tests extends AnyFunSuite {
   }
 
   test("Test: SHA3 256") {
-    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withConfig(SpinalConfig(inlineRom = true)).withWave.compile(new SHA3Core_Std(SHA3_256))
-    else SimConfig.withConfig(SpinalConfig(inlineRom = true)).withVpdWave.withVCS.compile(new SHA3Core_Std(SHA3_256))
+    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withConfig(SpinalConfig(inlineRom = true)).withVpdWave.withVCS.compile(new SHA3Core_Std(SHA3_256))
+    else SimConfig.withConfig(SpinalConfig(inlineRom = true)).withWave.compile(new SHA3Core_Std(SHA3_256))
     compiledRTL.doSim { dut =>
       dut.clockDomain.forkStimulus(2)
       HashIOsim.initializeIO(dut.io)
