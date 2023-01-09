@@ -21,3 +21,13 @@ object GenDefault {
       top
     }
 }
+
+object GenSHA256 {
+  // import config if exists
+  def main(args: Array[String]): Unit =
+    MySpinalConfig.generateVerilog {
+      val top = new SHA3Core_Std(SHA3_256, dataWidth = 512 bits)
+      top.setDefinitionName("dedup_sha256")
+      top
+    }
+}

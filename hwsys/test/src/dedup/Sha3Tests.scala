@@ -1,12 +1,13 @@
-package depdup
+package dedup
 
 import org.scalatest.funsuite.AnyFunSuite
 import spinal.core._
-import spinal.crypto.hash.{BIG_endian, LITTLE_endian, EndiannessMode, HashCoreIO}
+import spinal.crypto.hash.{BIG_endian, EndiannessMode, HashCoreIO, LITTLE_endian}
 import spinal.crypto._
 import spinal.core.sim._
 import spinal.crypto.hash.sha3._
 import ref.hash.SHA3
+
 import scala.util.Random
 
 class Sha3Tests extends AnyFunSuite {
@@ -14,7 +15,8 @@ class Sha3Tests extends AnyFunSuite {
   val NBR_ITERATION = 100
 
   test("Test: SHA3 512"){
-    val compiledRTL = SimConfig.withConfig(SpinalConfig(inlineRom = true)).withWave.compile(new SHA3Core_Std(SHA3_512))
+    val compiledRTL = if(sys.env.contains("VCS_HOME")) SimConfig.withConfig(SpinalConfig(inlineRom = true)).withWave.compile(new SHA3Core_Std(SHA3_512))
+    else SimConfig.withConfig(SpinalConfig(inlineRom = true)).withVpdWave.withVCS.compile(new SHA3Core_Std(SHA3_512))
     compiledRTL.doSim { dut =>
       dut.clockDomain.forkStimulus(2)
       HashIOsim.initializeIO(dut.io)
@@ -27,7 +29,8 @@ class Sha3Tests extends AnyFunSuite {
   }
 
   test("Test: SHA3 256") {
-    val compiledRTL = SimConfig.withConfig(SpinalConfig(inlineRom = true)).withWave.compile(new SHA3Core_Std(SHA3_256))
+    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withConfig(SpinalConfig(inlineRom = true)).withWave.compile(new SHA3Core_Std(SHA3_256))
+    else SimConfig.withConfig(SpinalConfig(inlineRom = true)).withVpdWave.withVCS.compile(new SHA3Core_Std(SHA3_256))
     compiledRTL.doSim { dut =>
       dut.clockDomain.forkStimulus(2)
       HashIOsim.initializeIO(dut.io)
@@ -38,7 +41,6 @@ class Sha3Tests extends AnyFunSuite {
       dut.clockDomain.waitActiveEdge(5)
     }
   }
-
 }
 
 object HashIOsim {
