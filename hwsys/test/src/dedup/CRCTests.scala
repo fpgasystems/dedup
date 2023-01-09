@@ -19,14 +19,14 @@ class CRCTests extends AnyFunSuite {
   def computeCRC(data: List[BigInt], mode: AlgoParams, dataWidth: Int, verbose: Boolean = false): BigInt = {
     val calculator = new CrcCalculator(mode)
 
-    val din = data.map(_.toByteArray.takeRight(dataWidth / 8)).flatten.toArray
+    val din = data.flatMap(_.toByteArray.takeRight(dataWidth / 8)).toArray
     val result = calculator.Calc(din, 0, din.length)
 
     if (verbose) {
       println(BigInt(result).toString(16))
     }
 
-    return BigInt(result)
+    BigInt(result)
   }
 
 
@@ -105,11 +105,15 @@ object CRCCombinationalsim {
 
     dut.cmd.data #= 0
     dut.cmd.mode #= CRCCombinationalCmdMode.INIT
-    dut.cmd.valid #= true
+    dut.cmd.valid #= false
 
     // check crc
     clockDomain.waitSampling()
     val crcRTL = dut.crc.toBigInt
+
+    clockDomain.waitSampling()
+    clockDomain.waitSampling()
+    clockDomain.waitSampling()
 
     dut.cmd.valid #= false
 
