@@ -3,7 +3,8 @@ import spinal.core._
 import spinal.crypto.hash.sha3._
 
 // default generator config
-object MySpinalConfig extends SpinalConfig(
+object MySpinalConfig
+    extends SpinalConfig(
       targetDirectory = "generated_rtl/",
       defaultConfigForClockDomains = ClockDomainConfig(
         resetKind = SYNC,
@@ -25,11 +26,12 @@ object GenDefault {
 
 object GenBloomFilterCRC {
   // import config if exists
-  def main(args: Array[String]): Unit = {
-    MySpinalConfig.generateVerilog ({
-      val top = new BloomFilterCRC()
-      top.setDefinitionName("dedup_bloomfiltercrc")
-      top
-    }).printPruned()
-  }
+  def main(args: Array[String]): Unit =
+    MySpinalConfig
+      .generateVerilog({
+        val top = new BloomFilterCRC()
+        top.setDefinitionName("dedup_bloomfiltercrc")
+        top
+      })
+      .printPruned()
 }
