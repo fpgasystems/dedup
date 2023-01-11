@@ -19,7 +19,7 @@ case class BloomFilterIO(conf: BloomFilterConfig) extends Bundle {
   val initEn   = in Bool () // trigger zeroing SRAM content
   val initDone = out Bool ()
   val frgmIn   = slave Stream (Fragment(Bits(conf.dataWidth bits)))
-  val res      = master Flow (Bool())
+  val res      = master Stream (Bool())
 }
 
 class BloomFilterCRC() extends Component {
@@ -53,9 +53,9 @@ class BloomFilterCRC() extends Component {
   val rInitDone = RegInit(False)
   io.initDone := rInitDone
 
-  val bfFsm = new StateMachine {
+  val fsm = new StateMachine {
     val IDLE                                      = new State with EntryPoint
-    val INIT, RUN_CRCINIT, RUN_NORMAL, RUN_LOOKUP = new State
+    val INIT, RUN_CRCINIT, RUN_NORMAL, RUN_LOOKUP, RUN_RETURN = new State
 
     val lookUpEn, wrBackEn = False
 
@@ -129,12 +129,17 @@ class BloomFilterCRC() extends Component {
       val memWrData = memRdData & (1 << rBitRdAddr) // bitwise
       mem.write(memWrAddr, memWrData, wrBackEn)
 
-      when(cntWrBack.willOverflow)(goto(RUN_CRCINIT))
+      when(io.initEn)(goto(INIT)) otherwise {
+        when(cntWrBack.willOverflow) (goto(RUN_RETURN))
+      }
     }
 
-    RUN_LOOKUP.onExit {
+    RUN_RETURN.whenIsActive {
       io.res.payload := lookupIsExist
-      io.res.valid   := True
+      io.res.valid := True
+      when(io.initEn)(goto(INIT)) otherwise {
+        when(io.res.fire) (goto(RUN_CRCINIT))
+      }
     }
   }
 

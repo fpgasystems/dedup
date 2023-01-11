@@ -1,6 +1,7 @@
 package dedup
 import spinal.core._
 import spinal.crypto.hash.sha3._
+import spinal.lib.bus.amba4.axi._
 
 // default generator config
 object MySpinalConfig
@@ -34,4 +35,21 @@ object GenBloomFilterCRC {
         top
       })
       .printPruned()
+}
+
+object Axi4ConfigAlveo {
+  val u55cHBM = Axi4Config(
+    addressWidth = 64,
+    dataWidth = 512,
+    idWidth = 6,
+    useStrb = true,
+    useBurst = true,
+    useId = true,
+    useLock = false,
+    useRegion = false,
+    useCache = false,
+    useProt = false,
+    useQos = false,
+    useLen = true
+  )
 }
