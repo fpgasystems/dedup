@@ -15,9 +15,9 @@ case class HashTabCmd (conf: HashTabConfig) extends Bundle {
   val isPostInst = Bool()
 }
 
-case class HashTabResp (conf: HashTabConfig) extends Bundle {
+case class HashTabResp (ptrWidth: Int = 64) extends Bundle {
   val isExist = Bool()
-  val dupPtr = UInt(conf.ptrWidth bits) // if(isExist) -> retur the ptr value found in the HashTable
+  val dupPtr = UInt(ptrWidth bits) // if(isExist) -> retur the ptr value found in the HashTable
 }
 
 case class DRAMRdCmd(conf: HashTabConfig) extends Bundle {
@@ -54,9 +54,8 @@ case class HashTabIO(conf: HashTabConfig) extends Bundle {
   val cmd = slave Stream(HashTabCmd(conf))
   val ptrStrm1 = slave Stream(UInt(conf.ptrWidth bits))
   val ptrStrm2 = slave Stream(UInt(conf.ptrWidth bits))
-  val res = master Stream(HashTabResp(conf))
+  val res = master Stream(HashTabResp(conf.ptrWidth))
   /** DRAM interface */
-
   val axiConf = Axi4ConfigAlveo.u55cHBM
   val axiMem = master(Axi4(axiConf))
 }

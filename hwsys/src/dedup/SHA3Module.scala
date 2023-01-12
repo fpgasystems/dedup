@@ -5,6 +5,7 @@ import spinal.lib._
 import spinal.lib.fsm._
 import spinal.crypto.hash.sha3._
 import spinal.crypto.hash._
+import util.FrgmDistributor
 
 case class SHA3Config(dataWidth: Int = 512, sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) {
   val resWidth = sha3Type.hashWidth
