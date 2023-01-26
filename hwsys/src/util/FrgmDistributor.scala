@@ -10,8 +10,7 @@ case class FrgmDistributorIO[T <: Data](n: Int, m: Int, frgmType: HardType[T]) e
 
 case class FrgmDistributor[T <: Data](n: Int, m: Int, frgmType: HardType[T]) extends Component {
   val io = FrgmDistributorIO(n, m, frgmType)
-  val frgmFire = io.strmI.fire & io.strmI.isLast
-  val cntSuperFrgm = Counter(m, frgmFire)
-  val cntOutSel = Counter(n, frgmFire & cntSuperFrgm.willOverflow)
+  val cntSuperFrgm = Counter(m, io.strmI.lastFire)
+  val cntOutSel = Counter(n, io.strmI.lastFire & cntSuperFrgm.willOverflow)
   (io.strmO, StreamDemux(io.strmI, cntOutSel, n)).zipped.foreach(_ << _)
 }

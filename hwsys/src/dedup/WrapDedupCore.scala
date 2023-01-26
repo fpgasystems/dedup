@@ -30,7 +30,7 @@ case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
   val axiMem = master(Axi4(axiConf))
 }
 
-class WrapDedupCore() {
+class WrapDedupCore() extends Component {
 
   val dedupConf = DedupConfig()
   val io = WrapDedupCoreIO(dedupConf)
@@ -49,7 +49,8 @@ class WrapDedupCore() {
   /** bloom filter */
   bFilter.io.frgmIn.translateFrom(pgStrmBF)((a, b) => {
     /** use the lsb 32b of the input 512b for CRC */
-    a.fragment := b.fragment(bFilter.bfConf.dataWidth)
+    a.fragment := b.fragment(bFilter.bfConf.dataWidth-1 downto 0)
+    a.last := b.last
   })
   /** fork the bloom filter result (bool) to SHA and Store module */
   val (bFilterRes2SHA, bFilterRes2Store) = StreamFork2(bFilter.io.res)
@@ -67,6 +68,7 @@ class WrapDedupCore() {
   hashTab.io.ptrStrm1 << pgWriter.io.ptrStrm1
   hashTab.io.ptrStrm2 << pgWriter.io.ptrStrm2
   hashTab.io.res >> pgWriter.io.lookupRes
+  hashTab.io.axiMem <> io.axiMem
 
   /** pageWriter */
   pgWriter.io.frgmIn << pgStrmSTORE

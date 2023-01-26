@@ -64,7 +64,7 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
 
   /** Arbiter the results */
   val cntSel = Counter(groupSize, io.res.fire)
-  io.res << StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp))
+  io.res.translateFrom(StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp)))(_ := _.digest)
 }
 
 
@@ -87,10 +87,10 @@ class SHA3CoreWrap(sha3Type: SHA3_Type) extends Component {
 
   val sha3Core = new SHA3Core_Std(sha3Type)
   sha3Core.io.init := False
-  sha3Core.io.cmd.setBlocked()
+  sha3Core.io.cmd.setIdle()
   io.rsp.setIdle()
+  io.cmd.setBlocked()
 
-  val frgmFire = io.cmd.fire && io.cmd.isLast
   io.rsp.payload := RegNextWhen(sha3Core.io.rsp, sha3Core.io.rsp.valid)
 
   val fsm = new StateMachine {
@@ -110,7 +110,7 @@ class SHA3CoreWrap(sha3Type: SHA3_Type) extends Component {
     CMD.whenIsActive {
       // cmd
       sha3Core.io.cmd << io.cmd
-      when(frgmFire) (goto(RES))
+      when(io.cmd.lastFire) (goto(RES))
     }
 
     RES.whenIsActive {

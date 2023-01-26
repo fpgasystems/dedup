@@ -8,6 +8,7 @@ import util.FrgmDemux
 
 case class PageWriterConfig(dataWidth: Int = 512, ptrWidth: Int = 64) {
   val pgIdxWidth = 32
+  val pgPtrWidth = 64
   val pgByteSize = 4096
   val pgAddBitShift = log2Up(pgByteSize)
   val pgWordCnt = pgByteSize / (dataWidth/8)
@@ -51,7 +52,7 @@ class PageWriter(conf: PageWriterConfig) extends Component {
   pgIdxGen.valid := True // always valid
   val pgIdxStrms = StreamDemux(pgIdxGen.continueWhen(io.bfRes.fire), io.bfRes.payload.asUInt, 2).map(_.queue(conf.pgIdxFifoSize))
 
-  io.bfRes.throwWhen(io.frgmIn.lastFire)
+  io.bfRes.throwWhen(io.frgmIn.lastFire).freeRun()
 
   /** demux1 with bloom filter res, T: PgBuffer, F: PgWr */
   val frgmDemux1 =  FrgmDemux(2, Bits(conf.dataWidth bits))
@@ -74,18 +75,17 @@ class PageWriter(conf: PageWriterConfig) extends Component {
   val pgStore = StreamFragmentArbiter(conf.frgmType)(Vec(pgGoThro, pgWr))
 
   /** store ptr generator*/
-  val storePtr = Counter(conf.pgIdxWidth bits, pgStore.fire)
+  val storePtr = Counter(conf.pgPtrWidth bits, pgStore.fire)
 
   /** resPtr stream */
   // mux(genPtr, lookupPtr)
-  val resPtr = Stream(UInt(conf.pgIdxWidth bits))
+  val resPtr = Stream(UInt(conf.pgPtrWidth bits))
   resPtr.payload := (io.lookupRes.isExist & pgBuffer.lastFire) ? io.lookupRes.dupPtr | (storePtr << conf.pgAddBitShift).resized
   // mux idxStream
   val resIdx = StreamMux(pgBuffer.lastFire.asUInt, pgIdxStrms)
 
   val resVld = pgGoThro.isLast | pgBuffer.isLast
   resPtr.valid := resVld
-  resIdx.valid := resVld
 
   val resJoin = StreamJoin(resIdx, resPtr)
   io.res.translateFrom(resJoin)((a,b) => {
@@ -94,11 +94,12 @@ class PageWriter(conf: PageWriterConfig) extends Component {
     a.isExist := io.lookupRes.isExist & pgBuffer.lastFire
   })
 
-  io.lookupRes.throwWhen(pgBuffer.lastFire)
+  io.lookupRes.throwWhen(pgBuffer.lastFire).freeRun()
   io.ptrStrm1.payload := storePtr
   io.ptrStrm2.payload := storePtr
-  io.ptrStrm1.valid.setWhen(pgGoThro.lastFire)
-  io.ptrStrm2.valid.setWhen(pgWr.lastFire)
+  //FIXME: stream violation
+  io.ptrStrm1.valid := pgGoThro.lastFire
+  io.ptrStrm2.valid := pgWr.lastFire
 
   /** page store / throw */
   pgThrow.freeRun()

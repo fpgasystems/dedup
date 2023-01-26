@@ -21,12 +21,12 @@ case class HashTabResp (ptrWidth: Int = 64) extends Bundle {
 }
 
 case class DRAMRdCmd(conf: HashTabConfig) extends Bundle {
-  val memOffs = UInt(conf.ptrWidth bits)
-  val nEntry = UInt(16 bits)
+  val memOffs = UInt(64 bits)
+  val nEntry = UInt(conf.bucketOffsWidth bits)
 }
 
 case class DRAMWrCmd(conf: HashTabConfig) extends Bundle {
-  val memOffs = UInt(48 bits) // hash entry offset in DRAM
+  val memOffs = UInt(64 bits) // hash entry offset in DRAM
   val ptrVal = UInt(conf.ptrWidth bits) // page pointer in storage
   val hashVal = Bits(conf.hashValWidth bits)
 }
@@ -60,7 +60,7 @@ case class HashTabIO(conf: HashTabConfig) extends Bundle {
   val axiMem = master(Axi4(axiConf))
 }
 
-class HashTab () {
+class HashTab () extends Component {
 
   val conf = HashTabConfig()
 
@@ -71,7 +71,6 @@ class HashTab () {
   val cmdMux = StreamMux(cmdPostIns.valid ? U(1) | U(0), Seq(io.cmd, cmdPostIns))
 
   /** default status of strems */
-  io.cmd.setBlocked()
   io.ptrStrm1.setBlocked()
   io.ptrStrm2.setBlocked()
 
@@ -82,26 +81,34 @@ class HashTab () {
 
   /** FSMs */
 
+  /** Resource */
+  val rInitDone = RegInit(False)
+  io.initDone := rInitDone
+  val memWrEn = False
+  val cntMemInit = Counter(conf.nBucket, memWrEn)
+
+  val memRdValid = RegNext(cmdMux.fire)
+  val rCmdMuxVld = memRdValid
+  val rCmdMux = RegNextWhen(cmdMux.payload, cmdMux.fire)
+
+  val dramRdCmdQ = StreamFifo(DRAMRdCmd(conf), conf.cmdQDepth)
+  val lookUpCmdQ = StreamFifo(HashTabCmd(conf), conf.cmdQDepth)
+  val dramWrHashCmd = Stream(HashTabCmd(conf))
+  val dramWrCmdQ = StreamFifo(DRAMWrCmd(conf), conf.cmdQDepth)
+
+  /** default */
+  dramRdCmdQ.io.push.setIdle()
+  dramRdCmdQ.io.pop.setBlocked()
+  lookUpCmdQ.io.push.setIdle()
+  lookUpCmdQ.io.pop.setBlocked()
+  dramWrCmdQ.io.push.setIdle()
+  dramWrHashCmd.setIdle()
+  dramWrHashCmd.setBlocked()
 
   val topFsm = new StateMachine {
     val IDLE, INIT = new State
     val RUN = new StateParallelFsm(lookupFsm())
     setEntry(IDLE)
-
-    /** Resource */
-    val rInitDone = RegInit(False)
-    io.initDone := rInitDone
-    val memWrEn = False
-    val cntMemInit = Counter(conf.bucketOffsWidth bits, memWrEn)
-
-    val memRdValid = RegNext(cmdMux.fire)
-    val rCmdMuxVld = memRdValid
-    val rCmdMux = RegNextWhen(cmdMux.payload, cmdMux.fire)
-
-    val dramRdCmdQ = StreamFifo(DRAMRdCmd(conf), conf.cmdQDepth)
-    val lookUpCmdQ = StreamFifo(HashTabCmd(conf), conf.cmdQDepth)
-    val dramWrHashCmd = Stream(HashTabCmd(conf))
-    val dramWrCmdQ = StreamFifo(DRAMWrCmd(conf), conf.cmdQDepth)
 
     /** Set default values */
     cmdPostIns.setIdle()
@@ -113,7 +120,7 @@ class HashTab () {
     INIT.whenIsActive {
       rInitDone := False
       memWrEn := True
-      mem.write(cntMemInit, B(0).resized, memWrEn)
+      mem.write(cntMemInit, B(0).resize(conf.bucketOffsWidth).asUInt, memWrEn)
       when(cntMemInit.willOverflow) {
         rInitDone := True
         goto(RUN)
@@ -134,7 +141,7 @@ class HashTab () {
       mem.write(rIdxBucket, bucketOccup+1, rCmdMuxFire & (rCmdMux.verb===HashTabVerb.INSERT)) // increase the entry occup
 
       dramRdCmdQ.io.push.valid := (rCmdMux.verb===HashTabVerb.LOOKUP) & rCmdMuxVld
-      dramRdCmdQ.io.push.payload.memOffs := conf.hashTabOffset + (rIdxBucket << conf.bucketAddrBitShift)
+      dramRdCmdQ.io.push.payload.memOffs := (conf.hashTabOffset + (rIdxBucket << conf.bucketAddrBitShift)).resized
       dramRdCmdQ.io.push.payload.nEntry := bucketOccup
 
       lookUpCmdQ.io.push.valid := (rCmdMux.verb===HashTabVerb.LOOKUP) & rCmdMuxVld
@@ -144,11 +151,13 @@ class HashTab () {
       val dramWrJoin = StreamJoin(dramWrHashCmd, rCmdMux.isPostInst ? io.ptrStrm2 | io.ptrStrm1)
 
       dramWrCmdQ.io.push.translateFrom(dramWrJoin)((a, b) => {
-        a.memOffs := conf.hashTabOffset + (rIdxBucket << conf.bucketAddrBitShift) + (bucketOccup << conf.entryAddrBitShift)
+        a.memOffs := (conf.hashTabOffset + (rIdxBucket << conf.bucketAddrBitShift) + (bucketOccup << conf.entryAddrBitShift)).resized
         a.ptrVal := b._2
         a.hashVal := b._1.hashVal
       })
     }
+
+    insertFsm()
 
     def lookupFsm() = new StateMachine {
 
@@ -173,7 +182,7 @@ class HashTab () {
 
       io.res.payload.isExist := rIsHashValMatch
       io.res.payload.dupPtr := rDupPtr.asUInt
-      io.res.setIdle()
+      io.res.valid := False
 
       val GET_CMD, ISSUE_AXI_CMD, RESP, POSTINST = new State
       setEntry(GET_CMD)
@@ -206,7 +215,7 @@ class HashTab () {
 
       RESP.onExit {
         /** reset registers */
-        lookUpCmdQ.io.pop.throwWhen(rIsHashValMatch)
+        lookUpCmdQ.io.pop.throwWhen(rIsHashValMatch).freeRun()
         rIsHashValMatch.clear()
       }
 
@@ -217,12 +226,12 @@ class HashTab () {
         cmdPostIns.isPostInst := True
         cmdPostIns.valid := True
         when(cmdPostIns.fire) (goto(GET_CMD))
-        lookUpCmdQ.io.pop.throwWhen(cmdPostIns.fire)
+        lookUpCmdQ.io.pop.throwWhen(cmdPostIns.fire).freeRun()
       }
 
     }
 
-    def insertFsm() = new StateMachine {
+    def insertFsm() = new Area {
       /** dramWrCmdQ.io.pop -> axi */
       val wrCmdQFork = StreamFork2(dramWrCmdQ.io.pop, synchronous = false)
       io.axiMem.aw.translateFrom(wrCmdQFork._1)((a, b) => {

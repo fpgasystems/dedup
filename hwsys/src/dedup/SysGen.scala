@@ -45,12 +45,8 @@ object GenDefault {
         top.setDefinitionName("dedup_core")
         top
       })
-      .printPruned()
+//      .printPruned()
 }
-
-
-
-
 
 
 object Axi4ConfigAlveo {
