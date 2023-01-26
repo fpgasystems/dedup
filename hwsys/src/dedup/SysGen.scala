@@ -15,7 +15,7 @@ object MySpinalConfig
 
 object MySpinalReport extends SpinalReport
 
-object GenDefault {
+object GenSHA3Core_Std {
   // import config if exists
   def main(args: Array[String]): Unit =
     MySpinalConfig.generateVerilog {
@@ -36,6 +36,22 @@ object GenBloomFilterCRC {
       })
       .printPruned()
 }
+
+object GenDefault {
+  def main(args: Array[String]): Unit =
+    MySpinalConfig
+      .generateVerilog({
+        val top = new WrapDedupCore()
+        top.setDefinitionName("dedup_core")
+        top
+      })
+      .printPruned()
+}
+
+
+
+
+
 
 object Axi4ConfigAlveo {
   val u55cHBM = Axi4Config(

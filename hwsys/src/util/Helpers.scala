@@ -188,3 +188,17 @@ object Axi4Arbiter {
   //  def apply(inConfig: Axi4Config, inCount: Int, outCount: Int, outAxi: Axi4)
 
 }
+
+object Stream2StreamFragment {
+  def apply[T <: Data](
+      strmIn: Stream[T],
+      frgmWordCnt: Int = 1
+  ): Stream[Fragment[T]] = {
+    val cnt = Counter(frgmWordCnt)
+    val strmOut = Stream(Fragment(strmIn.payloadType))
+    strmOut.arbitrationFrom(strmIn)
+    strmOut.fragment := strmIn.payload
+    strmOut.last := cnt.willOverflowIfInc
+    strmOut
+  }
+}

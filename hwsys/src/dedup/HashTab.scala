@@ -5,12 +5,12 @@ import spinal.lib._
 import spinal.lib.fsm._
 import spinal.lib.bus.amba4.axi._
 
-object HashTabCmdVerb extends SpinalEnum {
+object HashTabVerb extends SpinalEnum {
   val INSERT, LOOKUP = newElement()
 }
 
 case class HashTabCmd (conf: HashTabConfig) extends Bundle {
-  val verb = HashTabCmdVerb()
+  val verb = HashTabVerb()
   val hashVal = Bits(conf.hashValWidth bits)
   val isPostInst = Bool()
 }
@@ -60,7 +60,7 @@ case class HashTabIO(conf: HashTabConfig) extends Bundle {
   val axiMem = master(Axi4(axiConf))
 }
 
-class HashTab {
+class HashTab () {
 
   val conf = HashTabConfig()
 
@@ -124,23 +124,23 @@ class HashTab {
       when(io.initEn)(goto(INIT))
       /** should combine all following ready signals, also the needed join ptr1/2 should be valid */
       // FIXME: is correct to use dramWrCmdQ.io.push.ready?
-      cmdMux.ready := (cmdMux.verb===HashTabCmdVerb.LOOKUP) ? (dramRdCmdQ.io.push.ready & lookUpCmdQ.io.push.ready) | (cmdMux.isPostInst ? io.ptrStrm2.valid | io.ptrStrm1.valid) & dramWrCmdQ.io.push.ready
+      cmdMux.ready := (cmdMux.verb===HashTabVerb.LOOKUP) ? (dramRdCmdQ.io.push.ready & lookUpCmdQ.io.push.ready) | (cmdMux.isPostInst ? io.ptrStrm2.valid | io.ptrStrm1.valid) & dramWrCmdQ.io.push.ready
       val idxBucket = cmdMux.hashVal(conf.idxBucketWidth-1 downto 0).asUInt // lsb as the bucket index
       val rIdxBucket = RegNextWhen(idxBucket, cmdMux.fire)
       val rCmdMuxFire = RegNext(cmdMux.fire)
 
       /** logic after read latency (1 clk) */
       val bucketOccup = mem.readSync(idxBucket, cmdMux.fire) // entry occupancy in the target bucket
-      mem.write(rIdxBucket, bucketOccup+1, rCmdMuxFire & (rCmdMux.verb===HashTabCmdVerb.INSERT)) // increase the entry occup
+      mem.write(rIdxBucket, bucketOccup+1, rCmdMuxFire & (rCmdMux.verb===HashTabVerb.INSERT)) // increase the entry occup
 
-      dramRdCmdQ.io.push.valid := (rCmdMux.verb===HashTabCmdVerb.LOOKUP) & rCmdMuxVld
+      dramRdCmdQ.io.push.valid := (rCmdMux.verb===HashTabVerb.LOOKUP) & rCmdMuxVld
       dramRdCmdQ.io.push.payload.memOffs := conf.hashTabOffset + (rIdxBucket << conf.bucketAddrBitShift)
       dramRdCmdQ.io.push.payload.nEntry := bucketOccup
 
-      lookUpCmdQ.io.push.valid := (rCmdMux.verb===HashTabCmdVerb.LOOKUP) & rCmdMuxVld
+      lookUpCmdQ.io.push.valid := (rCmdMux.verb===HashTabVerb.LOOKUP) & rCmdMuxVld
       lookUpCmdQ.io.push.payload := rCmdMux
 
-      dramWrHashCmd.valid := (rCmdMux.verb===HashTabCmdVerb.INSERT) & rCmdMuxVld
+      dramWrHashCmd.valid := (rCmdMux.verb===HashTabVerb.INSERT) & rCmdMuxVld
       val dramWrJoin = StreamJoin(dramWrHashCmd, rCmdMux.isPostInst ? io.ptrStrm2 | io.ptrStrm1)
 
       dramWrCmdQ.io.push.translateFrom(dramWrJoin)((a, b) => {
@@ -155,7 +155,7 @@ class HashTab {
       /** Always block: Results comparison */
       io.axiMem.r.ready := True
       val isHashValMatch = io.axiMem.r.data(conf.hashValWidth-1 downto 0) === lookUpCmdQ.io.pop.hashVal
-      val rDupPtr = RegNextWhen(lookUpCmdQ.io.pop.hashVal, io.axiMem.r.fire & isHashValMatch)
+      val rDupPtr = RegNextWhen(io.axiMem.r.data(conf.ptrWidth+conf.hashValWidth-1 downto conf.hashValWidth), io.axiMem.r.fire & isHashValMatch)
       val rIsHashValMatch = RegInit(False)
 
       val burstLen = 8 //  outstanding words for 100ns round trip
@@ -172,7 +172,7 @@ class HashTab {
       io.axiMem.ar.valid := False
 
       io.res.payload.isExist := rIsHashValMatch
-      io.res.payload.dupPtr := rDupPtr
+      io.res.payload.dupPtr := rDupPtr.asUInt
       io.res.setIdle()
 
       val GET_CMD, ISSUE_AXI_CMD, RESP, POSTINST = new State
@@ -212,7 +212,7 @@ class HashTab {
 
       POSTINST.whenIsActive {
         /** insert (post lookup) logic */
-        cmdPostIns.verb := HashTabCmdVerb.INSERT
+        cmdPostIns.verb := HashTabVerb.INSERT
         cmdPostIns.hashVal := lookUpCmdQ.io.pop.hashVal
         cmdPostIns.isPostInst := True
         cmdPostIns.valid := True

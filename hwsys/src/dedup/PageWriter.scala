@@ -34,7 +34,7 @@ case class PageWriterIO(conf: PageWriterConfig) extends Bundle {
   /** interface bloomFilter that priliminarily filters the fragments*/
   val bfRes = slave Stream (Bool())
   /** interface hash table that stores the SHA3 entry of each page */
-  val ptrStrm1, ptrStrm2 = Stream(UInt(conf.ptrWidth bits))
+  val ptrStrm1, ptrStrm2 = master Stream(UInt(conf.ptrWidth bits))
   val lookupRes = slave Stream (HashTabResp(conf.ptrWidth))
   /** interfae storage, TODO: add bandwidth control module*/
   // val axiConf = Axi4ConfigAlveo.u55cHBM
