@@ -13,7 +13,6 @@ class CoreTests extends AnyFunSuite {
     else SimConfig.withWave.compile(new WrapDedupCore())
 
     compiledRTL.doSim { dut =>
-      dut.clockDomain.forkStimulus(2)
       DedupCoreSim.doSim(dut)
     }
   }

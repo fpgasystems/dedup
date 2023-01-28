@@ -5,8 +5,7 @@ import spinal.lib._
 import spinal.lib.bus.amba4.axi._
 
 import util.Stream2StreamFragment
-
-
+import scala.util.Random
 
 case class DedupConfig() {
   val pgSize = 4 * 1024
