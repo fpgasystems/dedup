@@ -194,7 +194,7 @@ object Stream2StreamFragment {
       strmIn: Stream[T],
       frgmWordCnt: Int = 1
   ): Stream[Fragment[T]] = {
-    val cnt = Counter(frgmWordCnt)
+    val cnt = Counter(frgmWordCnt, strmIn.fire)
     val strmOut = Stream(Fragment(strmIn.payloadType))
     strmOut.arbitrationFrom(strmIn)
     strmOut.fragment := strmIn.payload

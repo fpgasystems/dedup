@@ -23,7 +23,8 @@ case class BloomFilterIO(conf: BloomFilterConfig) extends Bundle {
 }
 
 class BloomFilterCRC() extends Component {
-  val bfConf = BloomFilterConfig(1 << log2Up(6432424), 3) // optimal value with 4096B page size, 10GB, 50% occupacy
+  // val bfConf = BloomFilterConfig(1 << log2Up(6432424), 3) // optimal value with 4096B page size, 10GB, 50% occupacy
+  val bfConf = BloomFilterConfig(1 << log2Up(16384), 3) // simulation test only, avoid long init time
   val io     = BloomFilterIO(bfConf)
 
   val mem        = Mem(Bits(bfConf.bramWidth bits), wordCount = bfConf.bramDepth)
@@ -111,7 +112,7 @@ class BloomFilterCRC() extends Component {
       val rBitRdAddr = Reg(UInt(log2Up(bfConf.bramWidth) bits)).init(0)
 
       val cntLookupIsOverflow = cntLookup.value === cntLookup.start && RegNext(lookUpEn)
-      lookUpEn := cntLookupIsOverflow
+      lookUpEn := ~cntLookupIsOverflow
       val lookUpVld = RegNext(lookUpEn) // one clock rd latency
       wrBackEn := lookUpVld
 

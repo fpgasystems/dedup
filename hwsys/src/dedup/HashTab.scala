@@ -215,7 +215,7 @@ class HashTab () extends Component {
 
       RESP.onExit {
         /** reset registers */
-        lookUpCmdQ.io.pop.throwWhen(rIsHashValMatch).freeRun()
+        lookUpCmdQ.io.pop.continueWhen(rIsHashValMatch).freeRun()
         rIsHashValMatch.clear()
       }
 
@@ -226,7 +226,7 @@ class HashTab () extends Component {
         cmdPostIns.isPostInst := True
         cmdPostIns.valid := True
         when(cmdPostIns.fire) (goto(GET_CMD))
-        lookUpCmdQ.io.pop.throwWhen(cmdPostIns.fire).freeRun()
+        lookUpCmdQ.io.pop.continueWhen(cmdPostIns.fire).freeRun()
       }
 
     }
