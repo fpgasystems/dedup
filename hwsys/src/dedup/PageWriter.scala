@@ -49,18 +49,19 @@ class PageWriter(conf: PageWriterConfig) extends Component {
   val io = PageWriterIO(conf)
   /** queue here to avoid blocking the wrap pgIn, which is also forked to BF & SHA3 */
   val frgmInQ = io.frgmIn.queue(512)
+  val bfResQ = io.bfRes.queue(8)
   val pgIdxCnt = Counter(conf.pgIdxWidth bits, frgmInQ.lastFire)
   val pgIdxGen = Stream(UInt(conf.pgIdxWidth bits))
   pgIdxGen.payload := pgIdxCnt
   pgIdxGen.valid := True // always valid
-  val pgIdxStrms = StreamDemux(pgIdxGen.continueWhen(io.bfRes.fire), io.bfRes.payload.asUInt, 2).map(_.queue(conf.pgIdxFifoSize))
+  val pgIdxStrms = StreamDemux(pgIdxGen.continueWhen(bfResQ.fire), bfResQ.payload.asUInt, 2).map(_.queue(conf.pgIdxFifoSize))
 
-  io.bfRes.continueWhen(frgmInQ.lastFire).freeRun()
+  bfResQ.continueWhen(frgmInQ.lastFire).freeRun()
 
   /** demux1 with bloom filter res, T: PgBuffer, F: PgWr */
   val frgmDemux1 =  FrgmDemux(2, Bits(conf.dataWidth bits))
-  frgmDemux1.io.sel := io.bfRes.payload.asUInt
-  frgmDemux1.io.en := io.bfRes.valid
+  frgmDemux1.io.sel := bfResQ.payload.asUInt
+  frgmDemux1.io.en := bfResQ.valid
   frgmDemux1.io.strmI << frgmInQ
   /** two pgWr path (fragment) */
   val pgGoThro = frgmDemux1.io.strmO(0)
