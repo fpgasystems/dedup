@@ -15,15 +15,18 @@ case class PageWriterConfig(dataWidth: Int = 512, ptrWidth: Int = 64) {
   val pgWordCnt = pgByteSize / (dataWidth/8)
 
   val pgIdxFifoSize = 256 // no fence on this stream flow, always assume there's enough space in idxFifo
-  val pgBufSize = 16 * pgWordCnt
-
-  val storeBufSize = 16 * pgWordCnt
+  val pgBufSize = 64 * pgWordCnt
 
   val frgmType = Bits(dataWidth bits)
 }
 
 case class PageWriterResp(conf: PageWriterConfig) extends Bundle {
   val pgIdx = UInt(conf.pgIdxWidth bits)
+  val pgPtr = UInt(conf.ptrWidth bits)
+  val isExist = Bool()
+}
+
+case class RespPtr(conf: PageWriterConfig) extends Bundle {
   val pgPtr = UInt(conf.ptrWidth bits)
   val isExist = Bool()
 }
@@ -83,19 +86,21 @@ class PageWriter(conf: PageWriterConfig) extends Component {
 
   /** resPtr stream */
   // mux(genPtr, lookupPtr)
-  val resPtr = Stream(UInt(conf.pgPtrWidth bits))
-  resPtr.payload := (io.lookupRes.isExist & pgBuffer.lastFire) ? io.lookupRes.dupPtr | (storePtr << conf.pgAddBitShift).resized
-  resPtr.valid := pgGoThro.isLast | pgBuffer.isLast
+  val resPtrQ = StreamFifo(RespPtr(conf), 8)
+  resPtrQ.io.push.payload.pgPtr := (io.lookupRes.isExist & pgBuffer.lastFire) ? io.lookupRes.dupPtr | (storePtr << conf.pgAddBitShift).resized
+  resPtrQ.io.push.payload.isExist := pgBuffer.lastFire ? io.lookupRes.isExist | False
+  resPtrQ.io.push.valid := pgGoThro.lastFire | pgBuffer.lastFire
+
 
   // mux idxStream
-  val resIdx = StreamMux(pgBuffer.lastFire.asUInt, pgIdxStrms)
+  val resIdxQ = StreamMux(pgBuffer.lastFire.asUInt, pgIdxStrms).queue(8)
 
   // queue the resPtr to make it a formal stream (no handshake in queue.io.push)
-  val resJoin = StreamJoin(resIdx, resPtr.queue(8))
+  val resJoin = StreamJoin(resIdxQ, resPtrQ.io.pop)
   io.res.translateFrom(resJoin)((a,b) => {
     a.pgIdx := b._1
-    a.pgPtr := b._2
-    a.isExist := io.lookupRes.isExist & pgBuffer.lastFire
+    a.pgPtr := b._2.pgPtr
+    a.isExist := b._2.isExist
   })
 
   io.lookupRes.continueWhen(pgBuffer.lastFire).freeRun()

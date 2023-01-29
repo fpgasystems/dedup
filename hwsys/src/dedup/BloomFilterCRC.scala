@@ -20,6 +20,11 @@ case class BloomFilterIO(conf: BloomFilterConfig) extends Bundle {
   val initDone = out Bool ()
   val frgmIn   = slave Stream (Fragment(Bits(conf.dataWidth bits)))
   val res      = master Stream (Bool())
+  val memRdData = out Bits(conf.bramWidth bits)
+  val memWrData = out Bits(conf.bramWidth bits)
+  val memRdAddr = out UInt(log2Up(conf.bramDepth) bits)
+  val memWrAddr = out UInt(log2Up(conf.bramDepth) bits)
+  val memWrBackEn = out Bool()
 }
 
 class BloomFilterCRC() extends Component {
@@ -122,18 +127,33 @@ class BloomFilterCRC() extends Component {
       rBitRdAddr := crcResVec(cntLookup)(log2Up(bfConf.bramWidth) - 1 downto 0).asUInt
 
       val memRdData = mem.readSync(memRdAddr, lookUpEn)
+      memRdData.dontSimplifyIt()
 
       when(lookUpVld) {
         lookupIsExist := lookupIsExist & memRdData(rBitRdAddr)
       }
 
-      val memWrData = memRdData & (1 << rBitRdAddr) // bitwise
+      val memWrData = memRdData | (1 << rBitRdAddr) // bitwise
       mem.write(memWrAddr, memWrData, wrBackEn)
 
       when(io.initEn)(goto(INIT)) otherwise {
         when(cntWrBack.willOverflow) (goto(RUN_RETURN))
       }
+
+      io.memRdAddr := memRdAddr
+      io.memWrAddr := memWrAddr
+      io.memRdData := memRdData
+      io.memWrData := memWrData
+      io.memWrBackEn := wrBackEn
+
     }
+
+    io.memRdAddr := 0
+    io.memWrAddr := 0
+    io.memRdData := 0
+    io.memWrData := 0
+    io.memWrBackEn := False
+
 
     RUN_RETURN.whenIsActive {
       io.res.payload := lookupIsExist

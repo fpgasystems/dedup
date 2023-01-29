@@ -195,13 +195,20 @@ class HashTab () extends Component {
       }
 
       ISSUE_AXI_CMD.whenIsActive {
-        when ((cntAxiRdCmd < (rDRAMRdCmd.nEntry / (burstLen*io.axiConf.dataWidth/8/conf.entryByteSize))) && ((cntAxiRdCmd - cntAxiRdResp) > maxOutStandReq)) {
-          io.axiMem.ar.valid := True
+        /** Zero entry in hash bucket */
+        when(rDRAMRdCmd.nEntry===0) {
+          goto(RESP)
+        } otherwise {
+          when((cntAxiRdCmd < ( (rDRAMRdCmd.nEntry-1) / (burstLen * io.axiConf.dataWidth / 8 / conf.entryByteSize) +1)) && ((cntAxiRdCmd - cntAxiRdResp) < maxOutStandReq)) {
+            io.axiMem.ar.valid := True
+          }
         }
+        /** early axiRd stop once hash value match */
         when(isHashValMatch) {
           rIsHashValMatch.set()
           goto(RESP)
         }
+
         when(cntAxiRdCmd===cntAxiRdResp && cntAxiRdResp > 0) {
           goto(RESP)
         }
@@ -218,6 +225,9 @@ class HashTab () extends Component {
         /** reset registers */
         lookUpCmdQ.io.pop.continueWhen(rIsHashValMatch).freeRun()
         rIsHashValMatch.clear()
+        /** clear the cntAxiRdCmd & cntAxiRdResp */
+        cntAxiRdCmd.clear()
+        cntAxiRdResp.clear()
       }
 
       POSTINST.whenIsActive {

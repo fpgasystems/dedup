@@ -4,6 +4,8 @@ import org.scalatest.funsuite.AnyFunSuite
 import spinal.core.sim._
 import util.sim._
 import util.sim.SimDriver._
+
+import scala.collection.mutable.ListBuffer
 import scala.util.Random
 
 class CoreTests extends AnyFunSuite {
@@ -39,12 +41,28 @@ object DedupCoreSim {
     dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
     /** generate page stream */
-    val pageNum = 1280
+    val pageNum = 512
+    val dupFacotr = 2
+    assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
+    val uniquePageNum = pageNum/dupFacotr
     val pageSize = 4096
     val bytePerWord = 64
 
-    val pgStrmData = List.fill[BigInt](pageNum*pageSize/bytePerWord)(BigInt(bytePerWord*8, Random))
-    //TODO: duplicate some pages
+    val uniquePgData = List.fill[BigInt](uniquePageNum*pageSize/bytePerWord)(BigInt(bytePerWord*8, Random))
+    var pgStrmData: ListBuffer[BigInt] = ListBuffer()
+    for (i <- 0 until uniquePageNum) {
+      for (j <- 0 until dupFacotr) {
+        for (k <- 0 until pageSize/bytePerWord) {
+//          pgStrmData.append(uniquePgData(i*pageSize/bytePerWord+k) + (BigInt(1)<<32)*j)
+          pgStrmData.append(uniquePgData(i*pageSize/bytePerWord+k))
+        }
+      }
+    }
+
+
+//    for (_ <- 0 until dupFacotr) {
+//      pgStrmData = pgStrmData ::: uniquePgData
+//    }
 
     val pgStrmPush = fork {
       var wordIdx: Int = 0
