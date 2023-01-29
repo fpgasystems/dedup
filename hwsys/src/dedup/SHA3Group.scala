@@ -24,11 +24,10 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
   val sizeFastBufferGrp = 16
   val sizeSlowBufferGrp = groupSize
   val sizeSuperFrgm = sizeSlowBufferGrp/sizeFastBufferGrp
-  val slowDownFactor = 512/32
 
   /** Fast buffer WxDxN: 512bx512x16(sizeFastBufferGrp) */
   val fastBufferGrp = Array.fill(sizeFastBufferGrp)(StreamFifo(Fragment(Bits(512 bits)), 512))
-  val fastBufferDistr = FrgmDistributor(sizeFastBufferGrp, sizeSuperFrgm, Bits(512 bits))
+  val fastBufferDistr = FrgmDistributor(sizeFastBufferGrp, 1, Bits(512 bits))
   fastBufferDistr.io.strmI << io.frgmIn
   (fastBufferGrp, fastBufferDistr.io.strmO).zipped.foreach(_.io.push << _)
   fastBufferGrp.foreach(_.io.flush := io.initEn) // flush all fast buffer
@@ -46,7 +45,8 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
 
   slowBufferGrp.zipWithIndex.foreach { case (e, i) =>
     val f = sizeSlowBufferGrp/sizeFastBufferGrp
-    e.io.push << slowBufferDistr(i/f).io.strmO(i%f)
+    /** send page fragment to slowBuffer following the page order  */
+    e.io.push << slowBufferDistr(i%sizeFastBufferGrp).io.strmO(i*f/sizeSlowBufferGrp)
   }
   slowBufferGrp.foreach(_.io.flush := io.initEn)
 

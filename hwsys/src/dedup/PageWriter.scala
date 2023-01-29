@@ -99,11 +99,16 @@ class PageWriter(conf: PageWriterConfig) extends Component {
   })
 
   io.lookupRes.continueWhen(pgBuffer.lastFire).freeRun()
-  io.ptrStrm1.payload := storePtr
-  io.ptrStrm2.payload := storePtr
-  //FIXME: stream violation
-  io.ptrStrm1.valid := pgGoThro.lastFire
-  io.ptrStrm2.valid := pgWr.lastFire
+
+  val ptrStrm1Q, ptrStrm2Q = StreamFifo(UInt(conf.ptrWidth bits), 128)
+  ptrStrm1Q.io.push.payload := (storePtr << conf.pgAddBitShift).resized
+  ptrStrm2Q.io.push.payload := (storePtr << conf.pgAddBitShift).resized
+  //FIXME: stream handshake violation
+  ptrStrm1Q.io.push.valid := pgGoThro.lastFire
+  ptrStrm2Q.io.push.valid := pgWr.lastFire
+
+  io.ptrStrm1 << ptrStrm1Q.io.pop
+  io.ptrStrm2 << ptrStrm2Q.io.pop
 
   /** page store / throw */
   pgThrow.freeRun()

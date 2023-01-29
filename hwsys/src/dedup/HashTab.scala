@@ -148,7 +148,8 @@ class HashTab () extends Component {
       lookUpCmdQ.io.push.payload := rCmdMux
 
       dramWrHashCmd.valid := (rCmdMux.verb===HashTabVerb.INSERT) & rCmdMuxVld
-      val dramWrJoin = StreamJoin(dramWrHashCmd, rCmdMux.isPostInst ? io.ptrStrm2 | io.ptrStrm1)
+      dramWrHashCmd.payload.hashVal := rCmdMux.hashVal
+      val dramWrJoin = StreamJoin(dramWrHashCmd, StreamMux(rCmdMux.isPostInst.asUInt, Seq(io.ptrStrm1, io.ptrStrm2)))
 
       dramWrCmdQ.io.push.translateFrom(dramWrJoin)((a, b) => {
         a.memOffs := (conf.hashTabOffset + (rIdxBucket << conf.bucketAddrBitShift) + (bucketOccup << conf.entryAddrBitShift)).resized
@@ -245,7 +246,7 @@ class HashTab () extends Component {
         val d = (b.ptrVal ## b.hashVal)
         a.data := d.resized
         a.last := True
-        a.strb := (1<<(d.getBitsWidth/8)-1)
+        a.strb := (BigInt(1)<<(d.getBitsWidth/8))-1
       })
       io.axiMem.b.ready := True
     }

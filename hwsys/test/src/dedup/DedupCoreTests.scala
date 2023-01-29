@@ -26,7 +26,7 @@ object DedupCoreSim {
 
   def doSim(dut: WrapDedupCore, verbose: Boolean = false): Unit = {
     dut.clockDomain.forkStimulus(period = 2)
-    SimTimeout(100000)
+    SimTimeout(1000000)
     /** memory model for HashTab */
     SimDriver.instAxiMemSim(dut.io.axiMem, dut.clockDomain, None)
 
@@ -39,7 +39,7 @@ object DedupCoreSim {
     dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
     /** generate page stream */
-    val pageNum = 64
+    val pageNum = 1280
     val pageSize = 4096
     val bytePerWord = 64
 
