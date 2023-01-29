@@ -68,6 +68,8 @@ object DedupCoreSim {
     }
 
     pgStrmPush.join()
+    pgWrRespWatch.join()
+
 
   }
 }

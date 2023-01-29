@@ -1,5 +1,6 @@
 package dedup
 
+import spinal.core.Component.push
 import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
@@ -83,13 +84,13 @@ class PageWriter(conf: PageWriterConfig) extends Component {
   // mux(genPtr, lookupPtr)
   val resPtr = Stream(UInt(conf.pgPtrWidth bits))
   resPtr.payload := (io.lookupRes.isExist & pgBuffer.lastFire) ? io.lookupRes.dupPtr | (storePtr << conf.pgAddBitShift).resized
+  resPtr.valid := pgGoThro.isLast | pgBuffer.isLast
+
   // mux idxStream
   val resIdx = StreamMux(pgBuffer.lastFire.asUInt, pgIdxStrms)
 
-  val resVld = pgGoThro.isLast | pgBuffer.isLast
-  resPtr.valid := resVld
-
-  val resJoin = StreamJoin(resIdx, resPtr)
+  // queue the resPtr to make it a formal stream (no handshake in queue.io.push)
+  val resJoin = StreamJoin(resIdx, resPtr.queue(8))
   io.res.translateFrom(resJoin)((a,b) => {
     a.pgIdx := b._1
     a.pgPtr := b._2
