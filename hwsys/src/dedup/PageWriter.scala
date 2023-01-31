@@ -84,27 +84,28 @@ class PageWriter(conf: PageWriterConfig) extends Component {
   /** store ptr generator*/
   val storePtr = Counter(conf.pgPtrWidth bits, pgStore.lastFire)
 
-  /** resPtr stream */
-  // mux(genPtr, lookupPtr)
-  val resPtrQ = StreamFifo(RespPtr(conf), 8)
-  resPtrQ.io.push.payload.pgPtr := (io.lookupRes.isExist & pgBuffer.lastFire) ? io.lookupRes.dupPtr | (storePtr << conf.pgAddBitShift).resized
-  resPtrQ.io.push.payload.isExist := pgBuffer.lastFire ? io.lookupRes.isExist | False
-  resPtrQ.io.push.valid := pgGoThro.lastFire | pgBuffer.lastFire
+  /** resPtr streams */
+  val resPtrQGoThro, resPtrQBuffer = StreamFifo(RespPtr(conf), 8)
+  resPtrQGoThro.io.push.payload.pgPtr := (storePtr << conf.pgAddBitShift).resized
+  resPtrQGoThro.io.push.payload.isExist := False
+  resPtrQGoThro.io.push.valid := pgGoThro.lastFire
 
+  resPtrQBuffer.io.push.payload.pgPtr := io.lookupRes.isExist ? io.lookupRes.dupPtr | (storePtr << conf.pgAddBitShift).resized
+  resPtrQBuffer.io.push.payload.isExist := io.lookupRes.isExist
+  resPtrQBuffer.io.push.valid := pgBuffer.lastFire
 
-  // mux idxStream
-  val resIdxQ = StreamMux(pgBuffer.lastFire.asUInt, pgIdxStrms).queue(8)
+  io.lookupRes.continueWhen(pgBuffer.lastFire).freeRun()
 
-  // queue the resPtr to make it a formal stream (no handshake in queue.io.push)
-  val resJoin = StreamJoin(resIdxQ, resPtrQ.io.pop)
-  io.res.translateFrom(resJoin)((a,b) => {
+  val resJoinPgGoThro = StreamJoin(pgIdxStrms(0), resPtrQGoThro.io.pop)
+  val resJoinPgBuffer = StreamJoin(pgIdxStrms(1), resPtrQBuffer.io.pop)
+
+  io.res.translateFrom(StreamMux(resJoinPgBuffer.valid.asUInt, Seq(resJoinPgGoThro, resJoinPgBuffer)))((a, b) => {
     a.pgIdx := b._1
     a.pgPtr := b._2.pgPtr
     a.isExist := b._2.isExist
   })
 
-  io.lookupRes.continueWhen(pgBuffer.lastFire).freeRun()
-
+  /** ptrStrm1: pgGoThrough store (not exist in bFilter), ptrStrm2: pgBuffered store (exist in bFilter, but SHA value does NOT match) */
   val ptrStrm1Q, ptrStrm2Q = StreamFifo(UInt(conf.ptrWidth bits), 128)
   ptrStrm1Q.io.push.payload := (storePtr << conf.pgAddBitShift).resized
   ptrStrm2Q.io.push.payload := (storePtr << conf.pgAddBitShift).resized

@@ -53,9 +53,27 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
   /** SHA3 cores */
   val sha3CoreGrp = Array.fill(groupSize)(new SHA3CoreWrap(SHA3_256))
 
-  sha3CoreGrp.foreach(_.io.initEn := io.initEn)
+  /** pipeline interface (initEn, cmd, res) of some SHA3Core to enable SLR allocation in implementation
+   * Normall one SLR in u55c device can have 48 SHA3 cores
+   */
+
   sha3CoreGrp.zipWithIndex.foreach { case (e, i) =>
-    e.io.cmd.translateFrom(slowBufferGrp(i).io.pop)((a, b) => {
+    if (i<16) {
+      e.io.initEn := io.initEn
+    } else {
+      e.io.initEn := RegNext(RegNext(RegNext(io.initEn)))
+    }
+  }
+
+  sha3CoreGrp.zipWithIndex.foreach { case (e, i) =>
+    val sha3Cmd = Stream(Fragment(Bits(32 bits)))
+    if (i<16) {
+      sha3Cmd << slowBufferGrp(i).io.pop.stage()
+    } else {
+      sha3Cmd << slowBufferGrp(i).io.pop.pipelined(true, true).pipelined(true, true)
+    }
+
+    e.io.cmd.translateFrom(sha3Cmd)((a, b) => {
       a.msg := b.fragment
       a.size := (32/8)-1
       a.last := b.last
@@ -64,7 +82,16 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
 
   /** Arbiter the results */
   val cntSel = Counter(groupSize, io.res.fire)
-  io.res.translateFrom(StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp)))(_ := _.digest)
+
+  val sha3Rsp = Vec(Stream(sha3CoreGrp(0).io.rsp.payloadType), groupSize)
+  sha3Rsp.zipWithIndex.foreach { case (e, i) =>
+    if (i < 16) {
+      e << sha3CoreGrp(i).io.rsp
+    } else {
+      e << sha3CoreGrp(i).io.rsp.pipelined(true, true).pipelined(true, true)
+    }
+  }
+  io.res.translateFrom(StreamMux(cntSel, sha3Rsp))(_ := _.digest)
 }
 
 

@@ -100,7 +100,9 @@ class HashTab () extends Component {
   dramRdCmdQ.io.push.setIdle()
   dramRdCmdQ.io.pop.setBlocked()
   lookUpCmdQ.io.push.setIdle()
-  lookUpCmdQ.io.pop.setBlocked()
+  val lookUpCmdQStage = lookUpCmdQ.io.pop.stage()
+  lookUpCmdQStage.setBlocked()
+
   dramWrCmdQ.io.push.setIdle()
   dramWrHashCmd.setIdle()
   dramWrHashCmd.setBlocked()
@@ -164,8 +166,16 @@ class HashTab () extends Component {
 
       /** Always block: Results comparison */
       io.axiMem.r.ready := True
-      val isHashValMatch = io.axiMem.r.data(conf.hashValWidth-1 downto 0) === lookUpCmdQ.io.pop.hashVal
-      val rDupPtr = RegNextWhen(io.axiMem.r.data(conf.ptrWidth+conf.hashValWidth-1 downto conf.hashValWidth), io.axiMem.r.fire & isHashValMatch)
+
+      /** slice 256-bits to 8 slices (each 32 bits)*/
+      val axiRdDataSlices = io.axiMem.r.data(conf.hashValWidth-1 downto 0).subdivideIn(8 slices)
+      val lookUpHashSlices = lookUpCmdQStage.hashVal.subdivideIn(8 slices)
+      val equalCheckStage1 = RegNext((axiRdDataSlices, lookUpHashSlices).zipped.map(_ ^ _).asBits())
+      val isHashValMatch = !equalCheckStage1.orR /** equalCheckStage2, 0: =!=; 1: === *, sync with signal rAxiMemRdFire */
+      val rAxiMemRdFire = RegNext(io.axiMem.r.fire)
+      val rAxiPgPtr = RegNextWhen(io.axiMem.r.data(conf.ptrWidth+conf.hashValWidth-1 downto conf.hashValWidth), io.axiMem.r.fire)
+
+      val rDupPtr = RegNextWhen(rAxiPgPtr, rAxiMemRdFire & isHashValMatch)
       val rIsHashValMatch = RegInit(False)
 
       val burstLen = 8 //  outstanding words for 100ns round trip
@@ -203,7 +213,7 @@ class HashTab () extends Component {
             io.axiMem.ar.valid := True
           }
         }
-        /** early axiRd stop once hash value match */
+        /** early axiRd stop once hash value matches */
         when(isHashValMatch) {
           rIsHashValMatch.set()
           goto(RESP)
@@ -223,7 +233,7 @@ class HashTab () extends Component {
 
       RESP.onExit {
         /** reset registers */
-        lookUpCmdQ.io.pop.continueWhen(rIsHashValMatch).freeRun()
+        lookUpCmdQStage.continueWhen(rIsHashValMatch).freeRun()
         rIsHashValMatch.clear()
         /** clear the cntAxiRdCmd & cntAxiRdResp */
         cntAxiRdCmd.clear()
@@ -233,11 +243,11 @@ class HashTab () extends Component {
       POSTINST.whenIsActive {
         /** insert (post lookup) logic */
         cmdPostIns.verb := HashTabVerb.INSERT
-        cmdPostIns.hashVal := lookUpCmdQ.io.pop.hashVal
+        cmdPostIns.hashVal := lookUpCmdQStage.hashVal
         cmdPostIns.isPostInst := True
         cmdPostIns.valid := True
         when(cmdPostIns.fire) (goto(GET_CMD))
-        lookUpCmdQ.io.pop.continueWhen(cmdPostIns.fire).freeRun()
+        lookUpCmdQStage.continueWhen(cmdPostIns.fire).freeRun()
       }
 
     }

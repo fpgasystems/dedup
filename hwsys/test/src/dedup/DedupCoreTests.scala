@@ -41,8 +41,8 @@ object DedupCoreSim {
     dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
     /** generate page stream */
-    val pageNum = 512
-    val dupFacotr = 2
+    val pageNum = 256
+    val dupFacotr = 4
     assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum/dupFacotr
     val pageSize = 4096
