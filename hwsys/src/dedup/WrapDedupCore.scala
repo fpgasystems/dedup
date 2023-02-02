@@ -25,8 +25,7 @@ case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
   val initDone = out Bool()
 
   /** hashTab memory interface */
-  val axiConf = Axi4ConfigAlveo.u55cHBM
-  val axiMem = master(Axi4(axiConf))
+  val axiMem = master(Axi4(Axi4ConfigAlveo.u55cHBM))
 }
 
 class WrapDedupCore() extends Component {

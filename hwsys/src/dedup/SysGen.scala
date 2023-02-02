@@ -48,6 +48,17 @@ object GenDefault {
 //      .printPruned()
 }
 
+object GenDedupSys {
+  def main(args: Array[String]): Unit =
+    MySpinalConfig
+      .generateVerilog({
+        val top = new WrapDedupSys()
+        top.setDefinitionName("dedup_sys")
+        top
+      })
+  //      .printPruned()
+}
+
 
 object Axi4ConfigAlveo {
   val u55cHBM = Axi4Config(

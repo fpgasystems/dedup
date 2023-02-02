@@ -53,10 +53,23 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
   /** SHA3 cores */
   val sha3CoreGrp = Array.fill(groupSize)(new SHA3CoreWrap(SHA3_256))
 
+  sha3CoreGrp.foreach(_.io.initEn := io.initEn)
+  sha3CoreGrp.zipWithIndex.foreach { case (e, i) =>
+    e.io.cmd.translateFrom(slowBufferGrp(i).io.pop.pipelined(true, true))((a, b) => {
+      a.msg := b.fragment
+      a.size := (32 / 8) - 1
+      a.last := b.last
+    })
+  }
+
+  /** Arbiter the results */
+  val cntSel = Counter(groupSize, io.res.fire)
+  io.res.translateFrom(StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp)))(_ := _.digest)
+
   /** pipeline interface (initEn, cmd, res) of some SHA3Core to enable SLR allocation in implementation
    * Normall one SLR in u55c device can have 48 SHA3 cores
    */
-
+  /**
   sha3CoreGrp.zipWithIndex.foreach { case (e, i) =>
     if (i<16) {
       e.io.initEn := io.initEn
@@ -92,6 +105,8 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
     }
   }
   io.res.translateFrom(StreamMux(cntSel, sha3Rsp))(_ := _.digest)
+  */
+
 }
 
 
