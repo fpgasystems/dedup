@@ -53,7 +53,8 @@ object GenDedupSys {
     MySpinalConfig
       .generateVerilog({
         val top = new WrapDedupSys()
-        top.setDefinitionName("dedup_sys")
+        top.renameIO()
+        top.setDefinitionName("dedup_4k")
         top
       })
   //      .printPruned()

@@ -21,9 +21,9 @@ case class PageWriterConfig(dataWidth: Int = 512, ptrWidth: Int = 64) {
 }
 
 case class PageWriterResp(conf: PageWriterConfig) extends Bundle {
-  val isExist = Bool()
   val pgIdx = UInt(conf.pgIdxWidth bits)
   val pgPtr = UInt(conf.ptrWidth bits)
+  val isExist = Bool()
 }
 
 case class RespPtr(conf: PageWriterConfig) extends Bundle {
