@@ -7,6 +7,7 @@ import spinal.core.sim._
 object SimHelpers {
 
   def bigIntTruncVal(value: BigInt, hi: Int, lo: Int): BigInt = {
+    assert(hi >= lo)
     (value >> lo) & (BigInt(1)<<(hi-lo+1))-1
   }
 

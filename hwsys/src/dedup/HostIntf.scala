@@ -115,6 +115,7 @@ class HostIntf() extends Component {
   bpss_wr_req.rsrvd := 0
   io.hostd.bpss_wr_req.data.assignFromBits(bpss_wr_req.asBits)
   val cntWordToSend = AccumIncDec(16 bits, io.hostd.bpss_wr_req.fire, io.hostd.axis_host_src.fire, wrReqBatchSize / 64, 1)
+  //FIXME: signed integer to avoid underflow?
   io.hostd.bpss_wr_req.valid := (pgRespQWide.io.occupancy - cntWordToSend.accum) >= wrReqBatchSize / 64
   when(io.hostd.bpss_wr_req.fire) {
     wrHostReq := wrHostReq + 1

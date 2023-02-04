@@ -6,6 +6,10 @@ import spinal.lib._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.amba4.axilite._
 import SimHelpers._
+import coyote._
+
+import scala.collection.mutable
+import scala.collection.mutable.Queue
 
 object SimDriver {
   val axiMemSimConf = AxiMemorySimConfig(
@@ -28,11 +32,11 @@ object SimDriver {
   }
 
   // Axi4Lite
-  def setAxi4LiteReg(cd: ClockDomain, bus: AxiLite4, addr: Int, data: Int): Unit = {
+  def setAxi4LiteReg(cd: ClockDomain, bus: AxiLite4, addr: Int, data: BigInt): Unit = {
     val awa = fork {
       bus.aw.addr #= addr
       bus.w.data #= data
-      bus.w.strb #= 0xF // strb for 4 Bytes
+      bus.w.strb #= 0xFF
       bus.aw.valid #= true
       bus.w.valid #= true
       cd.waitSamplingWhere(bus.aw.ready.toBoolean && bus.w.ready.toBoolean)
@@ -66,6 +70,14 @@ object SimDriver {
     ar.join()
     r.join()
     data
+  }
+
+  def initAxi4LiteBus(bus: AxiLite4): Unit = {
+    bus.ar.valid #= false
+    bus.r.ready #= false
+    bus.aw.valid #= false
+    bus.w.valid #= false
+    bus.b.ready #= false
   }
 
   // Axi4
@@ -152,6 +164,7 @@ object SimDriver {
     def recvData(cd: ClockDomain): BigInt = {
       stream.ready #= true
       cd.waitSamplingWhere(stream.valid.toBoolean)
+      stream.ready #= false
       stream.payload.toBigInt()
     }
 
@@ -166,4 +179,47 @@ object SimDriver {
     }
   }
 
+  def hostModel(cd: ClockDomain,
+                hostIO: HostDataIO,
+                hostSendQ: mutable.Queue[BigInt],
+                hostRecvQ: mutable.Queue[BigInt]
+             ): Unit = {
+
+    val dWidth = hostIO.axis_host_sink.payload.tdata.getBitsWidth
+
+    // read path
+    fork {
+      while(true){
+        val rdReqD = hostIO.bpss_rd_req.recvData(cd)
+        assert(hostSendQ.nonEmpty, "hostSendQ is empty!")
+        val reqByte = bigIntTruncVal(rdReqD, 47, 20).toInt
+        for (i <- 0 until reqByte/(dWidth/8)) {
+          val tkeep = (BigInt(1) << dWidth/8) - 1
+          val tlast = if (i == reqByte-1) BigInt(1) << (dWidth+dWidth/8) else 0.toBigInt
+          hostIO.axis_host_sink.sendData(cd, hostSendQ.dequeue() + tkeep + tlast)
+        }
+        hostIO.bpss_rd_done.sendData(cd, 0.toBigInt) // pid
+      }
+    }
+
+    // write path
+    fork {
+      while(true){
+        val wrReqD = hostIO.bpss_wr_req.recvData(cd)
+        val reqByte = bigIntTruncVal(wrReqD, 47, 20).toInt
+        println(s"get host_wr_req with reqByte: $reqByte")
+        for (i <- 0 until reqByte/(dWidth/8)) {
+          val d = hostIO.axis_host_src.recvData(cd)
+          if (i == reqByte-1) assert((d >> (dWidth+dWidth/8)) > 0) // confirm tlast
+          hostRecvQ.enqueue(d & ((BigInt(1) << 512)-1))
+        }
+        hostIO.bpss_wr_done.sendData(cd, 0.toBigInt) // pid
+      }
+    }
+  }
+
 }
+
+
+
+
