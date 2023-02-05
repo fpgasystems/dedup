@@ -64,9 +64,11 @@ object DedupCoreSim {
     dut.io.initEn #= false
     dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
+    dut.io.factorThrou #= 8
+
     /** generate page stream */
     val pageNum = 256
-    val dupFacotr = 4
+    val dupFacotr = 2
     assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum/dupFacotr
     val pageSize = 4096
@@ -135,8 +137,8 @@ object DedupSysSim {
     dut.io.hostd.bpss_rd_req.ready #= false
 
     /** generate pages and push to pre-load queue that serves the axis_host_sink */
-    val pageNum = 1024
-    val dupFacotr = 1
+    val pageNum = 256
+    val dupFacotr = 8
     assert(pageNum % dupFacotr == 0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum / dupFacotr
     val pageSize = 4096
@@ -164,6 +166,7 @@ object DedupSysSim {
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 5<<3, 4096) // LEN
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 6<<3, pageNum) // CNT
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 7<<3, 0) // PID
+    setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 10<<3, 8) // factorThrou
 
     // confirm initDone
     while(readAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 1<<3) == 0) {

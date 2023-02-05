@@ -26,6 +26,9 @@ case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
 
   /** hashTab memory interface */
   val axiMem = master(Axi4(Axi4ConfigAlveo.u55cHBM))
+
+  /** pgStore throughput control factor */
+  val factorThrou = in UInt(5 bits)
 }
 
 class WrapDedupCore() extends Component {
@@ -74,6 +77,7 @@ class WrapDedupCore() extends Component {
   pgWriter.io.frgmIn << pgStrmSTORE
   pgWriter.io.bfRes << bFilterRes2Store
   pgWriter.io.res >> io.pgResp
+  pgWriter.io.factorThrou := io.factorThrou
 
   /** init signals */
   bFilter.io.initEn := io.initEn

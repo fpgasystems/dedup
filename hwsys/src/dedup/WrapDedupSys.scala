@@ -35,7 +35,7 @@ class WrapDedupSys() extends Component with RenameIO {
   //REG: initDone (readOnly, addr: 1, bit: 0)
   ctrlR.read(dedupCore.io.initDone, 1 << log2Up(ctrlRByteSize), 0)
   //REG: host interface (addr: 2-8)
-  hostIntf.io.regMap(ctrlR, 2)
+  val ctrlRNumHostIntf = hostIntf.io.regMap(ctrlR, 2)
 
   //Resp logic
   val pgRespPad = Stream(Bits(128 bits))
@@ -45,5 +45,8 @@ class WrapDedupSys() extends Component with RenameIO {
 
   /** SLR0 << SLR1 */
   hostIntf.io.pgResp << pgRespPad.pipelined(StreamPipe.FULL)
+
+  /** pgStore throughput control [0:15] */
+  dedupCore.io.factorThrou := ctrlR.createReadAndWrite(UInt(5 bits), (ctrlRNumHostIntf+2) << log2Up(ctrlRByteSize), 0)
 
 }

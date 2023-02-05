@@ -5,7 +5,7 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
 import spinal.lib.bus.amba4.axi._
-import util.FrgmDemux
+import util.{CntDynmicBound, FrgmDemux}
 
 case class PageWriterConfig(dataWidth: Int = 512, ptrWidth: Int = 64) {
   val pgIdxWidth = 32
@@ -41,9 +41,11 @@ case class PageWriterIO(conf: PageWriterConfig) extends Bundle {
   /** interface hash table that stores the SHA3 entry of each page */
   val ptrStrm1, ptrStrm2 = master Stream(UInt(conf.ptrWidth bits))
   val lookupRes = slave Stream (HashTabResp(conf.ptrWidth))
-  /** interfae storage, TODO: add bandwidth control module*/
+  /** interfae storage */
   // val axiConf = Axi4ConfigAlveo.u55cHBM
   // val axiStore = master(Axi4(axiConf))
+  /** bandwidth controller */
+  val factorThrou = in UInt(5 bits)
 }
 
 
@@ -118,6 +120,22 @@ class PageWriter(conf: PageWriterConfig) extends Component {
 
   /** page store / throw */
   pgThrow.freeRun()
-  pgStore.freeRun()
 
+  /** store throughput control */
+  val cntFree = Counter(16, True) // a free running counter
+  val cntStoreFire = CntDynamic(io.factorThrou+1, pgStore.fire) // fire factorThrou words every 16 clock cycle
+  when(cntFree.willOverflow) (cntStoreFire.clearAll())
+
+  when(cntStoreFire.willOverflowIfInc) (pgStore.setBlocked()) otherwise pgStore.freeRun()
+}
+
+case class CntDynamic(upBoundEx: UInt, incFlag: Bool) {
+  val cnt = Reg(UInt(upBoundEx.getWidth bits)).init(0)
+  val willOverflowIfInc = (cnt === upBoundEx -1)
+  val willClear = False.allowOverride
+  def clearAll(): Unit = willClear := True
+  when(~willOverflowIfInc & incFlag) {
+    cnt := cnt + 1
+  }
+  when(willClear) (cnt.clearAll())
 }
