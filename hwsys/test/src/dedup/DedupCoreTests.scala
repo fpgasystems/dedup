@@ -64,14 +64,14 @@ object DedupCoreSim {
     dut.io.initEn #= false
     dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
-    dut.io.factorThrou #= 8
+    dut.io.factorThrou #= 16
 
     /** generate page stream */
     val pageNum = 256
-    val dupFacotr = 2
+    val dupFacotr = 4
     assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum/dupFacotr
-    val pageSize = 4096
+    val pageSize = 16384
     val bytePerWord = 64
 
     val uniquePgData = List.fill[BigInt](uniquePageNum*pageSize/bytePerWord)(BigInt(bytePerWord*8, Random))
@@ -141,7 +141,7 @@ object DedupSysSim {
     val dupFacotr = 8
     assert(pageNum % dupFacotr == 0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum / dupFacotr
-    val pageSize = 4096
+    val pageSize = 16384
     val bytePerWord = 64
 
     val uniquePgData = List.fill[BigInt](uniquePageNum * pageSize / bytePerWord)(BigInt(bytePerWord * 8, Random))
@@ -163,7 +163,7 @@ object DedupSysSim {
 
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 3<<3, 0) // RDHOSTADDR
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 4<<3, 0x1000) // WRHOSTADDR
-    setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 5<<3, 4096) // LEN
+    setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 5<<3, 16384) // LEN
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 6<<3, pageNum) // CNT
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 7<<3, 0) // PID
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 10<<3, 8) // factorThrou

@@ -48,13 +48,25 @@ object GenDefault {
 //      .printPruned()
 }
 
-object GenDedupSys {
+object GenDedupSys4K {
   def main(args: Array[String]): Unit =
     MySpinalConfig
       .generateVerilog({
         val top = new WrapDedupSys()
         top.renameIO()
         top.setDefinitionName("dedup_4k")
+        top
+      })
+  //      .printPruned()
+}
+
+object GenDedupSys16K {
+  def main(args: Array[String]): Unit =
+    MySpinalConfig
+      .generateVerilog({
+        val top = new WrapDedupSys()
+        top.renameIO()
+        top.setDefinitionName("dedup_16k")
         top
       })
   //      .printPruned()

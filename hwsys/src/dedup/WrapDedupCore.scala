@@ -8,7 +8,7 @@ import util.Stream2StreamFragment
 import scala.util.Random
 
 case class DedupConfig() {
-  val pgSize = 4 * 1024
+  val pgSize = 16 * 1024
   val pgWord = pgSize / 64
 
   /** config of submodules */
