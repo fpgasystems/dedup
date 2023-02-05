@@ -51,7 +51,7 @@ class HostIntf() extends Component {
   val io = new HostIntfIO(Axi4ConfigAlveo.u55cHBM)
 
   val rdHostReq, wrHostReq = Reg(UInt(32 bits)).init(0)
-  val rdHostAddr, wrHostAddr = Reg(UInt(64 bits)).init(0)
+  val rdAddr, wrAddr = Reg(UInt(64 bits)).init(0)
 
   val bpss_rd_req, bpss_wr_req = ReqT()
 
@@ -65,7 +65,8 @@ class HostIntf() extends Component {
     }
 
     IDLE.onExit {
-      rdHostAddr := io.rdHostAddr
+      rdAddr := io.rdHostAddr
+      wrAddr := io.wrHostAddr
       List(rdHostReq, wrHostReq, io.rdDone, io.wrDone).foreach(_.clearAll())
     }
 
@@ -75,7 +76,7 @@ class HostIntf() extends Component {
     }
   }
 
-  bpss_rd_req.vaddr := rdHostAddr.resized
+  bpss_rd_req.vaddr := rdAddr.resized
   bpss_rd_req.len := io.len.resized
   bpss_rd_req.stream := False
   bpss_rd_req.sync := False
@@ -89,7 +90,7 @@ class HostIntf() extends Component {
   io.hostd.bpss_rd_req.valid := (rdHostReq =/= io.cnt) && fsm.isActive(fsm.RD)
   when(io.hostd.bpss_rd_req.fire) {
     rdHostReq := rdHostReq + 1
-    rdHostAddr := rdHostAddr + io.len
+    rdAddr := rdAddr + io.len
   }
   io.hostd.bpss_rd_done.freeRun()
   when(io.hostd.bpss_rd_done.fire)(io.rdDone := io.rdDone + 1)
@@ -103,7 +104,7 @@ class HostIntf() extends Component {
   pgRespQWide.io.push.translateFrom(io.pgResp.slowdown(4)) (_ := _.asBits)
 
   val wrReqBatchSize = 256 // batch resp of 16 pages, each page resp is 128b (16B)
-  bpss_wr_req.vaddr := wrHostAddr.resized
+  bpss_wr_req.vaddr := wrAddr.resized
   bpss_wr_req.len := wrReqBatchSize
   bpss_wr_req.stream := False
   bpss_wr_req.sync := False
@@ -115,11 +116,10 @@ class HostIntf() extends Component {
   bpss_wr_req.rsrvd := 0
   io.hostd.bpss_wr_req.data.assignFromBits(bpss_wr_req.asBits)
   val cntWordToSend = AccumIncDec(16 bits, io.hostd.bpss_wr_req.fire, io.hostd.axis_host_src.fire, wrReqBatchSize / 64, 1)
-  //FIXME: signed integer to avoid underflow?
-  io.hostd.bpss_wr_req.valid := (pgRespQWide.io.occupancy - cntWordToSend.accum) >= wrReqBatchSize / 64
+  io.hostd.bpss_wr_req.valid := (pgRespQWide.io.occupancy - cntWordToSend.accum).asSInt >= (wrReqBatchSize / 64)
   when(io.hostd.bpss_wr_req.fire) {
     wrHostReq := wrHostReq + 1
-    wrHostAddr := wrHostAddr + wrReqBatchSize
+    wrAddr := wrAddr + wrReqBatchSize
   }
 
   io.hostd.bpss_wr_done.freeRun()

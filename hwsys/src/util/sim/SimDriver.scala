@@ -195,7 +195,7 @@ object SimDriver {
         val reqByte = bigIntTruncVal(rdReqD, 47, 20).toInt
         for (i <- 0 until reqByte/(dWidth/8)) {
           val tkeep = (BigInt(1) << dWidth/8) - 1
-          val tlast = if (i == reqByte-1) BigInt(1) << (dWidth+dWidth/8) else 0.toBigInt
+          val tlast = if (i == reqByte/(dWidth/8)-1) BigInt(1) << (dWidth+dWidth/8) else 0.toBigInt
           hostIO.axis_host_sink.sendData(cd, hostSendQ.dequeue() + tkeep + tlast)
         }
         hostIO.bpss_rd_done.sendData(cd, 0.toBigInt) // pid
@@ -207,10 +207,9 @@ object SimDriver {
       while(true){
         val wrReqD = hostIO.bpss_wr_req.recvData(cd)
         val reqByte = bigIntTruncVal(wrReqD, 47, 20).toInt
-        println(s"get host_wr_req with reqByte: $reqByte")
         for (i <- 0 until reqByte/(dWidth/8)) {
           val d = hostIO.axis_host_src.recvData(cd)
-          if (i == reqByte-1) assert((d >> (dWidth+dWidth/8)) > 0) // confirm tlast
+          if (i == reqByte/(dWidth/8)-1) assert((d >> (dWidth+dWidth/8)) > 0) // confirm tlast
           hostRecvQ.enqueue(d & ((BigInt(1) << 512)-1))
         }
         hostIO.bpss_wr_done.sendData(cd, 0.toBigInt) // pid
