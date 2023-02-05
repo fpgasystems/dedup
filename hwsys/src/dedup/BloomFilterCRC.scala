@@ -8,10 +8,10 @@ import spinal.crypto.checksum._
 import scala.collection.mutable.ArrayBuffer
 
 case class BloomFilterConfig(m: Int, k: Int, dataWidth: Int = 32) {
-  assert(m >= 8, "m MUST >= 8")
+  assert(m >= 64, "m MUST >= 64")
   assert(m == (1 << log2Up(m)), "m MUST be a power of 2")
   val mWidth    = log2Up(m)
-  val bramWidth = 8
+  val bramWidth = 64
   val bramDepth = m / bramWidth
 }
 
@@ -20,21 +20,14 @@ case class BloomFilterIO(conf: BloomFilterConfig) extends Bundle {
   val initDone = out Bool ()
   val frgmIn   = slave Stream (Fragment(Bits(conf.dataWidth bits)))
   val res      = master Stream (Bool())
-  val memRdData = out Bits(conf.bramWidth bits)
-  val memWrData = out Bits(conf.bramWidth bits)
-  val memRdAddr = out UInt(log2Up(conf.bramDepth) bits)
-  val memWrAddr = out UInt(log2Up(conf.bramDepth) bits)
-  val memWrBackEn = out Bool()
 }
 
 class BloomFilterCRC() extends Component {
-  // val bfConf = BloomFilterConfig(1 << log2Up(6432424), 3) // optimal value with 4096B page size, 10GB, 50% occupacy
-  val bfConf = BloomFilterConfig(1 << log2Up(16384), 3) // simulation test only, avoid long init time
+//   val bfConf = BloomFilterConfig(1 << log2Up(6432424), 3) // optimal value with 4096B page size, 10GB, 50% occupacy
+  val bfConf = BloomFilterConfig(1 << log2Up(131072), 3) // simulation test only, avoid long init time
   val io     = BloomFilterIO(bfConf)
 
   val mem        = Mem(Bits(bfConf.bramWidth bits), wordCount = bfConf.bramDepth)
-  val memWrEn    = False
-  val cntMemInit = Counter(log2Up(bfConf.bramDepth) bits, memWrEn)
 
   val crcSchemes = List(
     CRC32.Standard,
@@ -69,14 +62,26 @@ class BloomFilterCRC() extends Component {
     val cntWrBack     = Counter(bfConf.k, isActive(RUN_LOOKUP) & wrBackEn)
     val lookupIsExist = Reg(Bool())
 
+    val memRdAddr = UInt(log2Up(bfConf.bramDepth) bits)
+    val memWrAddr = RegNext(RegNext(memRdAddr)) // two cycle rd latency
+    val rBitRdAddr = Reg(UInt(log2Up(bfConf.bramWidth) bits)).init(0)
+    val memWrData = Bits(bfConf.bramWidth bits)
+
+    val memWrInitEn = False
+    val cntMemInit = Counter(log2Up(bfConf.bramDepth) bits, memWrInitEn)
+
+    memRdAddr.clearAll()
+    memWrData.clearAll()
+
+    val cntLookupIsOverflowed = Reg(Bool()).init(False)
+
     IDLE.whenIsActive {
       when(io.initEn)(goto(INIT))
     }
 
     INIT.whenIsActive {
       rInitDone := False
-      memWrEn   := True
-      mem.write(cntMemInit, B(0, bfConf.bramWidth bits), memWrEn)
+      memWrInitEn   := True
       when(cntMemInit.willOverflow) {
         rInitDone := True
         goto(RUN_CRCINIT)
@@ -111,49 +116,33 @@ class BloomFilterCRC() extends Component {
     }
 
     RUN_LOOKUP.whenIsActive {
-
-      val memRdAddr  = UInt(log2Up(bfConf.bramDepth) bits)
-      val memWrAddr  = RegNext(memRdAddr) // one clock rd latency
-      val rBitRdAddr = Reg(UInt(log2Up(bfConf.bramWidth) bits)).init(0)
-
-      val cntLookupIsOverflow = cntLookup.value === cntLookup.start && RegNext(lookUpEn)
-      lookUpEn := ~cntLookupIsOverflow
-      val lookUpVld = RegNext(lookUpEn) // one clock rd latency
+      cntLookupIsOverflowed.setWhen(cntLookup.willOverflow)
+      lookUpEn := ~cntLookupIsOverflowed
+      val lookUpVld = RegNext(RegNext(lookUpEn)) // two cycle rd latency
       wrBackEn := lookUpVld
 
       val crcResVec = Vec(crcKernel.map(_.io.crc))
 
       memRdAddr  := crcResVec(cntLookup)(bfConf.mWidth - 1 downto log2Up(bfConf.bramWidth)).asUInt
-      rBitRdAddr := crcResVec(cntLookup)(log2Up(bfConf.bramWidth) - 1 downto 0).asUInt
+      rBitRdAddr := crcResVec(RegNext(RegNext(cntLookup.value)))(log2Up(bfConf.bramWidth) - 1 downto 0).asUInt
 
-      val memRdData = mem.readSync(memRdAddr, lookUpEn)
-      memRdData.dontSimplifyIt()
+      val memRdData = RegNext(mem.readSync(memRdAddr, lookUpEn)) // one reg pipeline on rd port to meet ultra RAM requirement
 
       when(lookUpVld) {
         lookupIsExist := lookupIsExist & memRdData(rBitRdAddr)
       }
 
-      val memWrData = memRdData | (1 << rBitRdAddr) // bitwise
-      mem.write(memWrAddr, memWrData, wrBackEn)
+      memWrData := memRdData | (1 << rBitRdAddr) // bitwise
 
       when(io.initEn)(goto(INIT)) otherwise {
         when(cntWrBack.willOverflow) (goto(RUN_RETURN))
       }
 
-      io.memRdAddr := memRdAddr
-      io.memWrAddr := memWrAddr
-      io.memRdData := memRdData
-      io.memWrData := memWrData
-      io.memWrBackEn := wrBackEn
-
     }
 
-    io.memRdAddr := 0
-    io.memWrAddr := 0
-    io.memRdData := 0
-    io.memWrData := 0
-    io.memWrBackEn := False
-
+    RUN_LOOKUP.onExit {
+      cntLookupIsOverflowed.clear()
+    }
 
     RUN_RETURN.whenIsActive {
       io.res.payload := lookupIsExist
@@ -162,6 +151,13 @@ class BloomFilterCRC() extends Component {
         when(io.res.fire) (goto(RUN_CRCINIT))
       }
     }
+
   }
+
+  /** mux write cmd here to avoid multi-port memory for WR */
+  val memWrEn = fsm.memWrInitEn | (fsm.isActive(fsm.RUN_LOOKUP) & fsm.wrBackEn)
+  val memWrAddress = fsm.isActive(fsm.INIT) ? fsm.cntMemInit.value | fsm.memWrAddr
+  val memWrD = fsm.isActive(fsm.INIT) ? B(0, bfConf.bramWidth bits) | fsm.memWrData
+  mem.write(memWrAddress, memWrD, memWrEn)
 
 }
