@@ -64,11 +64,11 @@ object DedupCoreSim {
     dut.io.initEn #= false
     dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
-    dut.io.factorThrou #= 8
+    dut.io.factorThrou #= 4
 
     /** generate page stream */
     val pageNum = 256
-    val dupFacotr = 2
+    val dupFacotr = 4
     assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum/dupFacotr
     val pageSize = 4096
@@ -76,19 +76,21 @@ object DedupCoreSim {
 
     val uniquePgData = List.fill[BigInt](uniquePageNum*pageSize/bytePerWord)(BigInt(bytePerWord*8, Random))
     var pgStrmData: ListBuffer[BigInt] = ListBuffer()
-    for (i <- 0 until uniquePageNum) {
-      for (j <- 0 until dupFacotr) {
+//    for (i <- 0 until uniquePageNum) {
+//      for (j <- 0 until dupFacotr) {
+//        for (k <- 0 until pageSize/bytePerWord) {
+//          pgStrmData.append(uniquePgData(i*pageSize/bytePerWord+k))
+//        }
+//      }
+//    }
+
+    for (j <- 0 until dupFacotr) {
+      for (i <- 0 until uniquePageNum) {
         for (k <- 0 until pageSize/bytePerWord) {
-//          pgStrmData.append(uniquePgData(i*pageSize/bytePerWord+k) + (BigInt(1)<<32)*j)
           pgStrmData.append(uniquePgData(i*pageSize/bytePerWord+k))
         }
       }
     }
-
-
-//    for (_ <- 0 until dupFacotr) {
-//      pgStrmData = pgStrmData ::: uniquePgData
-//    }
 
     val pgStrmPush = fork {
       var wordIdx: Int = 0

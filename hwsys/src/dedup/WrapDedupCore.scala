@@ -63,7 +63,7 @@ class WrapDedupCore() extends Component {
   /** Hash table for page SHA3 values
    *  queue the bFilterRes2SHA here because the result latency in SHA3Grp
    */
-  hashTab.io.cmd.translateFrom(StreamJoin(bFilterRes2SHA.queue(128), sha3Grp.io.res))((a, b) => {
+  hashTab.io.cmd.translateFrom(StreamJoin(bFilterRes2SHA.queue(128), sha3Grp.io.res.queue(128)))((a, b) => {
     a.verb := b._1 ? HashTabVerb.LOOKUP | HashTabVerb.INSERT
     a.hashVal := b._2
     a.isPostInst := False

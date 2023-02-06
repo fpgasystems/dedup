@@ -63,6 +63,7 @@ class PageWriter(conf: PageWriterConfig) extends Component {
 
   bfResQ.continueWhen(frgmInQ.lastFire).freeRun()
 
+
   /** demux1 with bloom filter res, T: PgBuffer, F: PgWr */
   val frgmDemux1 =  FrgmDemux(2, Bits(conf.dataWidth bits))
   frgmDemux1.io.sel := bfResQ.payload.asUInt
@@ -127,6 +128,13 @@ class PageWriter(conf: PageWriterConfig) extends Component {
   when(cntFree.willOverflow) (cntStoreFire.clearAll())
 
   when(cntStoreFire.willOverflowIfInc) (pgStore.setBlocked()) otherwise pgStore.freeRun()
+
+
+  /** init */
+  when(io.initEn) {
+    pgIdxCnt.clear()
+    storePtr.clear()
+  }
 }
 
 case class CntDynamic(upBoundEx: UInt, incFlag: Bool) {
