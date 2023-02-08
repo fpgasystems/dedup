@@ -31,7 +31,7 @@ case class DRAMWrCmd(conf: HashTabConfig) extends Bundle {
   val hashVal = Bits(conf.hashValWidth bits)
 }
 
-case class HashTabConfig (hashValWidth: Int = 256, ptrWidth: Int = 64, hashTabSize: Int = (1<<20), bucketSize: Int = 256) {
+case class HashTabConfig (hashValWidth: Int = 256, ptrWidth: Int = 64, hashTabSize: Int = (1<<14), bucketSize: Int = 256) {
   assert(hashTabSize%bucketSize==0, "Hash table size (#entry) should be a multiple of bucketSize")
   val nBucket = hashTabSize / bucketSize
   val idxBucketWidth = log2Up(nBucket)
@@ -133,7 +133,7 @@ class HashTab () extends Component {
       when(io.initEn)(goto(INIT))
       /** should combine all following ready signals, also the needed join ptr1/2 should be valid */
       // FIXME: is correct to use dramWrCmdQ.io.push.ready?
-      cmdMux.ready := (cmdMux.verb===HashTabVerb.LOOKUP) ? (dramRdCmdQ.io.push.ready & lookUpCmdQ.io.push.ready) | (cmdMux.isPostInst ? io.ptrStrm2.valid | io.ptrStrm1.valid) & dramWrCmdQ.io.push.ready
+      cmdMux.ready := (cmdMux.verb===HashTabVerb.LOOKUP) ? (dramRdCmdQ.io.availability > 1 & lookUpCmdQ.io.availability > 1) | (cmdMux.isPostInst ? io.ptrStrm2.valid | io.ptrStrm1.valid) & dramWrCmdQ.io.push.ready
       val idxBucket = cmdMux.hashVal(conf.idxBucketWidth-1 downto 0).asUInt // lsb as the bucket index
       val rIdxBucket = RegNextWhen(idxBucket, cmdMux.fire)
       val rCmdMuxFire = RegNext(cmdMux.fire)
@@ -184,7 +184,7 @@ class HashTab () extends Component {
       val maxOutStandReq = 2
       val rDRAMRdCmd = RegNextWhen(dramRdCmdQ.io.pop.payload, dramRdCmdQ.io.pop.fire)
 
-      io.axiMem.ar.addr := rDRAMRdCmd.memOffs + cntAxiRdCmd * burstLen * io.axiConf.dataWidth/8
+      io.axiMem.ar.addr := (rDRAMRdCmd.memOffs + cntAxiRdCmd * burstLen * io.axiConf.dataWidth/8).resized
       io.axiMem.ar.id := 0
       io.axiMem.ar.len := burstLen-1
       io.axiMem.ar.size := log2Up(io.axiConf.dataWidth/8)
@@ -209,14 +209,13 @@ class HashTab () extends Component {
         when(rDRAMRdCmd.nEntry===0) {
           goto(RESP)
         } otherwise {
-          when((cntAxiRdCmd < ( (rDRAMRdCmd.nEntry-1) / (burstLen * io.axiConf.dataWidth / 8 / conf.entryByteSize) +1)) && ((cntAxiRdCmd - cntAxiRdResp) < maxOutStandReq)) {
+          when((cntAxiRdCmd < ( (rDRAMRdCmd.nEntry-1) / (burstLen * io.axiConf.dataWidth / 8 / conf.entryByteSize) +1)) && ((cntAxiRdCmd - cntAxiRdResp) < maxOutStandReq) && ~rIsHashValMatch) {
             io.axiMem.ar.valid := True
           }
         }
         /** early axiRd stop once hash value matches */
         when(isHashValMatch) {
           rIsHashValMatch.set()
-          goto(RESP)
         }
 
         when(cntAxiRdCmd===cntAxiRdResp && cntAxiRdResp > 0) {
@@ -256,7 +255,7 @@ class HashTab () extends Component {
       /** dramWrCmdQ.io.pop -> axi */
       val wrCmdQFork = StreamFork2(dramWrCmdQ.io.pop, synchronous = false)
       io.axiMem.aw.translateFrom(wrCmdQFork._1)((a, b) => {
-        a.addr := b.memOffs
+        a.addr := b.memOffs.resized
         a.id := 0
         a.len := 0
         a.size := log2Up(io.axiConf.dataWidth/8)

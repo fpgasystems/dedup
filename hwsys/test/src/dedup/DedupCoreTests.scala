@@ -68,27 +68,29 @@ object DedupCoreSim {
 
     /** generate page stream */
     val pageNum = 256
-    val dupFacotr = 4
+    val dupFacotr = 1
     assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum/dupFacotr
-    val pageSize = 16384
+    val pageSize = 4096
     val bytePerWord = 64
 
     val uniquePgData = List.fill[BigInt](uniquePageNum*pageSize/bytePerWord)(BigInt(bytePerWord*8, Random))
     var pgStrmData: ListBuffer[BigInt] = ListBuffer()
-    for (i <- 0 until uniquePageNum) {
-      for (j <- 0 until dupFacotr) {
+//    for (i <- 0 until uniquePageNum) {
+//      for (j <- 0 until dupFacotr) {
+//        for (k <- 0 until pageSize/bytePerWord) {
+//          pgStrmData.append(uniquePgData(i*pageSize/bytePerWord+k))
+//        }
+//      }
+//    }
+
+    for (j <- 0 until dupFacotr) {
+      for (i <- 0 until uniquePageNum) {
         for (k <- 0 until pageSize/bytePerWord) {
-//          pgStrmData.append(uniquePgData(i*pageSize/bytePerWord+k) + (BigInt(1)<<32)*j)
           pgStrmData.append(uniquePgData(i*pageSize/bytePerWord+k))
         }
       }
     }
-
-
-//    for (_ <- 0 until dupFacotr) {
-//      pgStrmData = pgStrmData ::: uniquePgData
-//    }
 
     val pgStrmPush = fork {
       var wordIdx: Int = 0
@@ -141,7 +143,7 @@ object DedupSysSim {
     val dupFacotr = 8
     assert(pageNum % dupFacotr == 0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum / dupFacotr
-    val pageSize = 16384
+    val pageSize = 4096
     val bytePerWord = 64
 
     val uniquePgData = List.fill[BigInt](uniquePageNum * pageSize / bytePerWord)(BigInt(bytePerWord * 8, Random))
@@ -163,7 +165,7 @@ object DedupSysSim {
 
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 3<<3, 0) // RDHOSTADDR
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 4<<3, 0x1000) // WRHOSTADDR
-    setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 5<<3, 16384) // LEN
+    setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 5<<3, 4096) // LEN
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 6<<3, pageNum) // CNT
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 7<<3, 0) // PID
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 10<<3, 8) // factorThrou
