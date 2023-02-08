@@ -62,18 +62,34 @@ object GenDedupSys {
 
 
 object Axi4ConfigAlveo {
-  val u55cHBM = Axi4Config(
-    addressWidth = 64,
-    dataWidth = 512,
-    idWidth = 6,
-    useStrb = true,
-    useBurst = true,
-    useId = true,
-    useLock = false,
-    useRegion = false,
-    useCache = false,
-    useProt = false,
-    useQos = false,
-    useLen = true
-  )
+//  val u55cHBM = Axi4Config(
+//    addressWidth = 64,
+//    dataWidth = 512,
+//    idWidth = 6,
+//    useStrb = true,
+//    useBurst = true,
+//    useId = true,
+//    useLock = false,
+//    useRegion = false,
+//    useCache = false,
+//    useProt = false,
+//    useQos = false,
+//    useLen = true
+//  )
+//
+val u55cHBM = Axi4Config(
+  addressWidth = 20,
+  dataWidth = 512,
+  idWidth = 6,
+  useStrb = true,
+  useBurst = true,
+  useId = true,
+  useLock = false,
+  useRegion = false,
+  useCache = false,
+  useProt = false,
+  useQos = false,
+  useLen = true
+)
+
 }
