@@ -10,7 +10,7 @@ import util.{CntDynmicBound, FrgmDemux}
 case class PageWriterConfig(dataWidth: Int = 512, ptrWidth: Int = 64) {
   val pgIdxWidth = 32
   val pgPtrWidth = 64
-  val pgByteSize = 16384
+  val pgByteSize = 4096
   val pgAddBitShift = log2Up(pgByteSize)
   val pgWordCnt = pgByteSize / (dataWidth/8)
 
@@ -53,8 +53,8 @@ class PageWriter(conf: PageWriterConfig) extends Component {
 
   val io = PageWriterIO(conf)
   /** queue here to avoid blocking the wrap pgIn, which is also forked to BF & SHA3 */
-  val frgmInQ = io.frgmIn.queue(32 * conf.pgWordCnt)
-  val bfResQ = io.bfRes.queue(128)
+  val frgmInQ = io.frgmIn.queue(512)
+  val bfResQ = io.bfRes.queue(8)
   val pgIdxCnt = Counter(conf.pgIdxWidth bits, frgmInQ.lastFire)
   val pgIdxGen = Stream(UInt(conf.pgIdxWidth bits))
   pgIdxGen.payload := pgIdxCnt

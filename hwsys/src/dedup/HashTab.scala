@@ -31,7 +31,7 @@ case class DRAMWrCmd(conf: HashTabConfig) extends Bundle {
   val hashVal = Bits(conf.hashValWidth bits)
 }
 
-case class HashTabConfig (hashValWidth: Int = 256, ptrWidth: Int = 64, hashTabSize: Int = (1<<14), bucketSize: Int = 256) {
+case class HashTabConfig (hashValWidth: Int = 256, ptrWidth: Int = 64, hashTabSize: Int = (1<<20), bucketSize: Int = 256) {
   assert(hashTabSize%bucketSize==0, "Hash table size (#entry) should be a multiple of bucketSize")
   val nBucket = hashTabSize / bucketSize
   val idxBucketWidth = log2Up(nBucket)
@@ -184,7 +184,7 @@ class HashTab () extends Component {
       val maxOutStandReq = 2
       val rDRAMRdCmd = RegNextWhen(dramRdCmdQ.io.pop.payload, dramRdCmdQ.io.pop.fire)
 
-      io.axiMem.ar.addr := (rDRAMRdCmd.memOffs + cntAxiRdCmd * burstLen * io.axiConf.dataWidth/8).resized
+      io.axiMem.ar.addr := rDRAMRdCmd.memOffs + cntAxiRdCmd * burstLen * io.axiConf.dataWidth/8
       io.axiMem.ar.id := 0
       io.axiMem.ar.len := burstLen-1
       io.axiMem.ar.size := log2Up(io.axiConf.dataWidth/8)
@@ -255,7 +255,7 @@ class HashTab () extends Component {
       /** dramWrCmdQ.io.pop -> axi */
       val wrCmdQFork = StreamFork2(dramWrCmdQ.io.pop, synchronous = false)
       io.axiMem.aw.translateFrom(wrCmdQFork._1)((a, b) => {
-        a.addr := b.memOffs.resized
+        a.addr := b.memOffs
         a.id := 0
         a.len := 0
         a.size := log2Up(io.axiConf.dataWidth/8)

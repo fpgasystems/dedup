@@ -48,7 +48,7 @@ object GenDefault {
 //      .printPruned()
 }
 
-object GenDedupSys4K {
+object GenDedupSys {
   def main(args: Array[String]): Unit =
     MySpinalConfig
       .generateVerilog({
@@ -60,48 +60,20 @@ object GenDedupSys4K {
   //      .printPruned()
 }
 
-object GenDedupSys16K {
-  def main(args: Array[String]): Unit =
-    MySpinalConfig
-      .generateVerilog({
-        val top = new WrapDedupSys()
-        top.renameIO()
-        top.setDefinitionName("dedup_16k")
-        top
-      })
-  //      .printPruned()
-}
-
 
 object Axi4ConfigAlveo {
-//  val u55cHBM = Axi4Config(
-//    addressWidth = 64,
-//    dataWidth = 512,
-//    idWidth = 6,
-//    useStrb = true,
-//    useBurst = true,
-//    useId = true,
-//    useLock = false,
-//    useRegion = false,
-//    useCache = false,
-//    useProt = false,
-//    useQos = false,
-//    useLen = true
-//  )
-//
-val u55cHBM = Axi4Config(
-  addressWidth = 20,
-  dataWidth = 512,
-  idWidth = 6,
-  useStrb = true,
-  useBurst = true,
-  useId = true,
-  useLock = false,
-  useRegion = false,
-  useCache = false,
-  useProt = false,
-  useQos = false,
-  useLen = true
-)
-
+  val u55cHBM = Axi4Config(
+    addressWidth = 64,
+    dataWidth = 512,
+    idWidth = 6,
+    useStrb = true,
+    useBurst = true,
+    useId = true,
+    useLock = false,
+    useRegion = false,
+    useCache = false,
+    useProt = false,
+    useQos = false,
+    useLen = true
+  )
 }

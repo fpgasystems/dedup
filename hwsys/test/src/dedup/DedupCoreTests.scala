@@ -67,8 +67,8 @@ object DedupCoreSim {
     dut.io.factorThrou #= 16
 
     /** generate page stream */
-    val pageNum = 256
-    val dupFacotr = 1
+    val pageNum = 64
+    val dupFacotr = 2
     assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
     val uniquePageNum = pageNum/dupFacotr
     val pageSize = 4096
