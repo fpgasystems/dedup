@@ -84,8 +84,8 @@ class HashTab () extends Component {
   /** Resource */
   val rInitDone = RegInit(False)
   io.initDone := rInitDone
-  val memWrEn = False
-  val cntMemInit = Counter(conf.nBucket, memWrEn)
+  val memInitEn = False
+  val cntMemInit = Counter(conf.nBucket, memInitEn)
 
   val memRdValid = RegNext(cmdMux.fire)
   val rCmdMuxVld = memRdValid
@@ -121,26 +121,23 @@ class HashTab () extends Component {
 
     INIT.whenIsActive {
       rInitDone := False
-      memWrEn := True
-      mem.write(cntMemInit, B(0).resize(conf.bucketOffsWidth).asUInt, memWrEn)
+      memInitEn := True
       when(cntMemInit.willOverflow) {
         rInitDone := True
         goto(RUN)
       }
     }
     /** Normal mode */
+    val idxBucket = cmdMux.hashVal(conf.idxBucketWidth-1 downto 0).asUInt // lsb as the bucket index
+    val rIdxBucket = RegNextWhen(idxBucket, cmdMux.fire)
+    val rCmdMuxFire = RegNext(cmdMux.fire)
+    val bucketOccup = mem.readSync(idxBucket, cmdMux.fire) // entry occupancy in the target bucket
+
     RUN.whenIsActive {
       when(io.initEn)(goto(INIT))
       /** should combine all following ready signals, also the needed join ptr1/2 should be valid */
       // FIXME: is correct to use dramWrCmdQ.io.push.ready?
       cmdMux.ready := (cmdMux.verb===HashTabVerb.LOOKUP) ? (dramRdCmdQ.io.availability > 1 & lookUpCmdQ.io.availability > 1) | (cmdMux.isPostInst ? io.ptrStrm2.valid | io.ptrStrm1.valid) & dramWrCmdQ.io.push.ready
-      val idxBucket = cmdMux.hashVal(conf.idxBucketWidth-1 downto 0).asUInt // lsb as the bucket index
-      val rIdxBucket = RegNextWhen(idxBucket, cmdMux.fire)
-      val rCmdMuxFire = RegNext(cmdMux.fire)
-
-      /** logic after read latency (1 clk) */
-      val bucketOccup = mem.readSync(idxBucket, cmdMux.fire) // entry occupancy in the target bucket
-      mem.write(rIdxBucket, bucketOccup+1, rCmdMuxFire & (rCmdMux.verb===HashTabVerb.INSERT)) // increase the entry occup
 
       dramRdCmdQ.io.push.valid := (rCmdMux.verb===HashTabVerb.LOOKUP) & rCmdMuxVld
       dramRdCmdQ.io.push.payload.memOffs := (conf.hashTabOffset + (rIdxBucket << conf.bucketAddrBitShift)).resized
@@ -159,6 +156,13 @@ class HashTab () extends Component {
         a.hashVal := b._1.hashVal
       })
     }
+
+    // nEntry memory write, only one write operation is permitted!
+    val memWrAddr = memInitEn ? cntMemInit.value | rIdxBucket
+    val memWrVal =  memInitEn ? B(0).resize(conf.bucketOffsWidth).asUInt | bucketOccup+1 /** logic after read latency (1 clk) */
+    val memWrEn = memInitEn | rCmdMuxFire & (rCmdMux.verb===HashTabVerb.INSERT)
+    mem.write(memWrAddr, memWrVal, memWrEn)
+
 
     insertFsm()
 

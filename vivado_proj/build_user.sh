@@ -38,6 +38,6 @@ cd $BUILD_DIR
 # create user top project
 vivado -mode batch -source $SCRIPT_DIR/gen_proj.tcl -tclargs $APP $USER_CONFIG $FPGA_PART_NAME
 # 
-# vivado -mode batch -source $SCRIPT_DIR/build_user.tcl -tclargs $APP $USER_CONFIG $SHELL_DIR $FPGA_PART_NAME
+vivado -mode batch -source $SCRIPT_DIR/build_user.tcl -tclargs $APP $USER_CONFIG $SHELL_DIR $FPGA_PART_NAME
 
 echo "Done"

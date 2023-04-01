@@ -57,7 +57,6 @@ class HostDataIO extends Bundle {
     axis_host_sink.setBlocked()
     axis_host_src.setIdle()
   }
-
 }
 
 class CMemHostIO(cmemAxiConf: Axi4Config) extends Bundle {

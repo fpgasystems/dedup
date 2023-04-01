@@ -157,6 +157,7 @@ object DedupSysSim {
     }
 
     val pgRespQ: mutable.Queue[BigInt] = mutable.Queue()
+
     // host model
     hostModel(dut.clockDomain, dut.io.hostd, pgStrmData, pgRespQ)
 
