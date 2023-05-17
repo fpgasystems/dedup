@@ -53,6 +53,8 @@ object DedupCoreSim {
   def doSim(dut: WrapDedupCore, verbose: Boolean = false): Unit = {
     dut.clockDomain.forkStimulus(period = 2)
     SimTimeout(1000000)
+    dut.io.pgStrmIn.valid #= false
+    dut.io.pgResp.ready #= false
     /** memory model for HashTab */
     SimDriver.instAxiMemSim(dut.io.axiMem, dut.clockDomain, None)
 
