@@ -1,4 +1,4 @@
-package dedup
+package dedup.bloomfilter
 
 import spinal.core._
 import spinal.crypto._

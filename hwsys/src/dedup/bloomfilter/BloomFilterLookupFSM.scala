@@ -1,4 +1,5 @@
 package dedup
+package bloomfilter
 
 import spinal.core._
 import spinal.lib._
@@ -7,54 +8,43 @@ import spinal.crypto.checksum._
 
 import scala.collection.mutable.ArrayBuffer
 
-case class BloomFilterConfig(m: Int, k: Int, dataWidth: Int = 32) {
-  assert(m >= 64, "m MUST >= 64")
-  assert(m == (1 << log2Up(m)), "m MUST be a power of 2")
-  val mWidth    = log2Up(m)
-  val bramWidth = 64
-  val bramDepth = m / bramWidth
+case class BloomFilterLookupFSMInstr(bfConf: BloomFilterConfig) extends Bundle{
+  val CRCHash = Vec(Bits(32 bits), bfConf.k)
+  val opCode = DedupCoreOp()
 }
 
-case class BloomFilterIO(conf: BloomFilterConfig) extends Bundle {
-  val initEn   = in Bool () // trigger zeroing SRAM content
-  val initDone = out Bool ()
-  val frgmIn   = slave Stream (Fragment(Bits(conf.dataWidth bits)))
-  val res      = master Stream (Bool())
+object BloomFilterLookupResEnum extends SpinalEnum(binarySequential) {
+  val IS_NEW, IS_EXIST = newElement()
 }
 
-class BloomFilterCRC() extends Component {
-//   val bfConf = BloomFilterConfig(1 << log2Up(6432424), 3) // optimal value with 4096B page size, 10GB, 50% occupacy
-  val bfConf = BloomFilterConfig(1 << log2Up(131072), 3) // simulation test only, avoid long init time
-  val io     = BloomFilterIO(bfConf)
+case class BloomFilterLookupFSMRes() extends Bundle{
+  val lookupRes = BloomFilterLookupResEnum()
+  val opCode = DedupCoreOp()
+}
+
+case class BloomFilterLookupFSMIO(bfConf: BloomFilterConfig) extends Bundle {
+  val initEn      = in Bool () // trigger zeroing SRAM content
+  val initDone    = out Bool ()
+  val instrStrmIn = slave Stream (BloomFilterLookupFSMInstr(bfConf))
+  val res         = master Stream (BloomFilterLookupFSMRes())
+}
+
+class BloomFilterLookupFSM(bfConf : BloomFilterConfig = BloomFilterConfig(1 << log2Up(131072), 3)) extends Component {
+  val io         = BloomFilterLookupFSMIO(bfConf)
 
   val mem        = Mem(Bits(bfConf.bramWidth bits), wordCount = bfConf.bramDepth)
 
-  val crcSchemes = List(
-    CRC32.Standard,
-    CRC32.Bzip2,
-    CRC32.Jamcrc,
-    CRC32.C,
-    CRC32.D,
-    CRC32.Mpeg2,
-    CRC32.Posix,
-    CRC32.Xfer
-  )
+  val instr      = Reg(BloomFilterLookupFSMInstr(bfConf))
 
-  val crcKernel = ArrayBuffer.empty[CRCModule]
-  for (i <- 0 until bfConf.k)
-    crcKernel += CRCModule(CRCCombinationalConfig(crcSchemes(i), bfConf.dataWidth bits))
-
-  io.frgmIn.setBlocked()
-  crcKernel.foreach(_.io.cmd.setIdle())
-
+  io.instrStrmIn.setBlocked()
   io.res.setIdle()
 
   val rInitDone = RegInit(False)
   io.initDone := rInitDone
 
   val fsm = new StateMachine {
-    val IDLE                                      = new State with EntryPoint
-    val INIT, RUN_CRCINIT, RUN_NORMAL, RUN_LOOKUP, RUN_RETURN = new State
+    val INIT                         = new State with EntryPoint
+    val IDLE, RUN_LOOKUP, RUN_RETURN = new State
 
     val lookUpEn, wrBackEn = False
 
@@ -75,39 +65,27 @@ class BloomFilterCRC() extends Component {
 
     val cntLookupIsOverflowed = Reg(Bool()).init(False)
 
-    IDLE.whenIsActive {
-      when(io.initEn)(goto(INIT))
-    }
-
     INIT.whenIsActive {
-      rInitDone := False
-      memWrInitEn   := True
+      io.instrStrmIn.ready := False
+      io.res.valid         := False
+      rInitDone            := False
+      memWrInitEn          := True
       when(cntMemInit.willOverflow) {
         rInitDone := True
-        goto(RUN_CRCINIT)
+        goto(IDLE)
       }
     }
 
-    RUN_CRCINIT.whenIsActive {
-      // init logic
-      crcKernel.foreach { x =>
-        x.io.cmd.valid := True
-        x.io.cmd.data  := 0
-        x.io.cmd.mode  := CRCCombinationalCmdMode.INIT
-      }
-      when(io.initEn)(goto(INIT)) otherwise (goto(RUN_NORMAL))
-    }
-
-    RUN_NORMAL.whenIsActive {
-      // logic
-      io.frgmIn.ready := True
-      crcKernel.foreach { x =>
-        x.io.cmd.valid := io.frgmIn.valid
-        x.io.cmd.data  := io.frgmIn.fragment
-        x.io.cmd.mode  := CRCCombinationalCmdMode.UPDATE
-      }
-      when(io.initEn)(goto(INIT)) otherwise {
-        when(io.frgmIn.isLast & io.frgmIn.fire)(goto(RUN_LOOKUP))
+    IDLE.whenIsActive {
+      io.instrStrmIn.ready := True
+      io.res.valid         := False
+      when(io.initEn){
+        goto(INIT)
+      } otherwise {
+        when(io.instrStrmIn.fire){
+          instr := io.instrStrmIn.payload
+          goto(RUN_LOOKUP)
+        }
       }
     }
 
@@ -116,12 +94,14 @@ class BloomFilterCRC() extends Component {
     }
 
     RUN_LOOKUP.whenIsActive {
+      io.instrStrmIn.ready := False
+      io.res.valid         := False
       cntLookupIsOverflowed.setWhen(cntLookup.willOverflow)
       lookUpEn := ~cntLookupIsOverflowed
       val lookUpVld = RegNext(RegNext(lookUpEn)) // two cycle rd latency
       wrBackEn := lookUpVld
 
-      val crcResVec = Vec(crcKernel.map(_.io.crc))
+      val crcResVec = instr.CRCHash
 
       memRdAddr  := crcResVec(cntLookup)(bfConf.mWidth - 1 downto log2Up(bfConf.bramWidth)).asUInt
       rBitRdAddr := crcResVec(RegNext(RegNext(cntLookup.value)))(log2Up(bfConf.bramWidth) - 1 downto 0).asUInt
@@ -131,8 +111,10 @@ class BloomFilterCRC() extends Component {
       when(lookUpVld) {
         lookupIsExist := lookupIsExist & memRdData(rBitRdAddr)
       }
-
-      memWrData := memRdData | (1 << rBitRdAddr) // bitwise
+      
+      when(instr.opCode === DedupCoreOp.WRITE2FREE) {
+        memWrData := memRdData | (1 << rBitRdAddr) // bitwise
+      }
 
       when(io.initEn)(goto(INIT)) otherwise {
         when(cntWrBack.willOverflow) (goto(RUN_RETURN))
@@ -145,10 +127,12 @@ class BloomFilterCRC() extends Component {
     }
 
     RUN_RETURN.whenIsActive {
-      io.res.payload := lookupIsExist
-      io.res.valid := True
+      io.instrStrmIn.ready     := False
+      io.res.payload.opCode    := instr.opCode
+      io.res.payload.lookupRes assignFromBits (lookupIsExist.asBits)
+      io.res.valid             := True
       when(io.initEn)(goto(INIT)) otherwise {
-        when(io.res.fire) (goto(RUN_CRCINIT))
+        when(io.res.fire) (goto(IDLE))
       }
     }
 

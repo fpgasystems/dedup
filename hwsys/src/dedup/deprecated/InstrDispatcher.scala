@@ -1,4 +1,4 @@
-package dedup
+package dedup.deprecated
 
 import spinal.core._
 import spinal.lib._
