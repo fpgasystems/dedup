@@ -49,7 +49,7 @@ case class BloomFilterInstrIssuer(conf: DedupConfig) extends Component{
 
     fire  := ready & valid
 
-    // slicing
+    // slicing: slice instruction with pagecount = 10 to 10x instr on one page 
     val slicingCounter = Counter(conf.LBAWidth)
     when(io.initEn){
       slicingCounter.clear()
@@ -57,6 +57,8 @@ case class BloomFilterInstrIssuer(conf: DedupConfig) extends Component{
       when(fire){
         slicingCounter.increment()
       }
+      // waiting instruction: write, 10 pages
+      // fire this when CRC fire 10 times
       io.waitingInstrStream.ready := ((io.waitingInstrStream.payload.pageCount - 1) === slicingCounter.value) & fire
 
       when(io.waitingInstrStream.fire){
@@ -70,6 +72,7 @@ case class BloomFilterInstrIssuer(conf: DedupConfig) extends Component{
   }
 
   val instrIssuer = new Area {
+    // issue based on the input order
     when(waitingInstrJoiner.valid & (waitingInstrJoiner.payload.tag === tagGenerator.value)){
       // issue waiting instr
       io.readyInstrStream.setBlocked()

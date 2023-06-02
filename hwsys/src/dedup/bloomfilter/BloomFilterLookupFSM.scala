@@ -43,8 +43,8 @@ class BloomFilterLookupFSM(bfConf : BloomFilterConfig = BloomFilterConfig(1 << l
   io.initDone := rInitDone
 
   val fsm = new StateMachine {
-    val INIT                         = new State with EntryPoint
-    val IDLE, RUN_LOOKUP, RUN_RETURN = new State
+    val START                            = new State with EntryPoint
+    val INIT, IF, RUN_LOOKUP, RUN_RETURN = new State
 
     val lookUpEn, wrBackEn = False
 
@@ -64,6 +64,10 @@ class BloomFilterLookupFSM(bfConf : BloomFilterConfig = BloomFilterConfig(1 << l
     memWrData.clearAll()
 
     val cntLookupIsOverflowed = Reg(Bool()).init(False)
+    
+    START.whenIsActive {
+      when(io.initEn)(goto(INIT))
+    }
 
     INIT.whenIsActive {
       io.instrStrmIn.ready := False
@@ -72,11 +76,12 @@ class BloomFilterLookupFSM(bfConf : BloomFilterConfig = BloomFilterConfig(1 << l
       memWrInitEn          := True
       when(cntMemInit.willOverflow) {
         rInitDone := True
-        goto(IDLE)
+        goto(IF)
       }
     }
 
-    IDLE.whenIsActive {
+    IF.whenIsActive {
+      // instruction fetching
       io.instrStrmIn.ready := True
       io.res.valid         := False
       when(io.initEn){
@@ -112,6 +117,7 @@ class BloomFilterLookupFSM(bfConf : BloomFilterConfig = BloomFilterConfig(1 << l
         lookupIsExist := lookupIsExist & memRdData(rBitRdAddr)
       }
       
+      // TODO: change to Counting Bloom Filter
       when(instr.opCode === DedupCoreOp.WRITE2FREE) {
         memWrData := memRdData | (1 << rBitRdAddr) // bitwise
       }
@@ -132,7 +138,7 @@ class BloomFilterLookupFSM(bfConf : BloomFilterConfig = BloomFilterConfig(1 << l
       io.res.payload.lookupRes assignFromBits (lookupIsExist.asBits)
       io.res.valid             := True
       when(io.initEn)(goto(INIT)) otherwise {
-        when(io.res.fire) (goto(IDLE))
+        when(io.res.fire) (goto(IF))
       }
     }
 

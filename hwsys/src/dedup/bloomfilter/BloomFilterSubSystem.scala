@@ -23,6 +23,21 @@ case class BloomFilterSSIO(conf: DedupConfig) extends Bundle {
   val res          = master Stream (BloomFilterLookupFSMRes())
 }
 
+/* 
+  To add instruction path to bloom filter, the previous bloomfilter is restructured to bloom filter subsystem
+  The first half is the CRC calculation and instruction processing
+  Data will be send to CRC Kernel and the results will be cached in CRCResQueue
+  512 bits raw instructions will be decoded by the decoder:
+    write -> opCode = write, length(number of pages) -> waiting for CRC, go to decodedWaitingInstrQueue
+    erase -> opCode = erase, CRC -> ready to issue to FSM, go to decodedReadyInstrQueue
+    read -> throw
+  Issuer will combine CRC and write instruction or select a ready instruction and give to FSM.
+  Now the strategy is issued instruction are in the same order as input to the decoder
+  
+  The second half is the Bloom Filter lookup logic, lookup FSM
+  I break the old FSM into CRC and lookup FSM, no big changes in FSM
+  The FSM accepts (opCode, CRC) format of instruction from outside.
+*/
 class BloomFilterSubSystem(conf : DedupConfig) extends Component {
   val io     = BloomFilterSSIO(conf)
 
