@@ -17,12 +17,11 @@ case class SHA3GroupIO(conf: SHA3Config) extends Bundle {
   val res      = master Stream (Bits(conf.resWidth bits))
 }
 
-class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Component {
-  val sha3Conf = SHA3Config(512, sha3Type, groupSize)
+class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component { 
   val io = SHA3GroupIO(sha3Conf)
 
   val sizeFastBufferGrp = 16
-  val sizeSlowBufferGrp = groupSize
+  val sizeSlowBufferGrp = sha3Conf.groupSize
   val sizeSuperFrgm = sizeSlowBufferGrp/sizeFastBufferGrp
 
   /** Fast buffer WxDxN: 512bx512x16(sizeFastBufferGrp) */
@@ -51,7 +50,7 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
   slowBufferGrp.foreach(_.io.flush := io.initEn)
 
   /** SHA3 cores */
-  val sha3CoreGrp = Array.fill(groupSize)(new SHA3CoreWrap(SHA3_256))
+  val sha3CoreGrp = Array.fill(sizeSlowBufferGrp)(new SHA3CoreWrap(SHA3_256))
 
   sha3CoreGrp.foreach(_.io.initEn := io.initEn)
   sha3CoreGrp.zipWithIndex.foreach { case (e, i) =>
@@ -63,7 +62,7 @@ class SHA3Group(sha3Type: SHA3_Type = SHA3_256, groupSize: Int = 64) extends Com
   }
 
   /** Arbiter the results */
-  val cntSel = Counter(groupSize, io.res.fire)
+  val cntSel = Counter(sizeSlowBufferGrp, io.res.fire)
   io.res.translateFrom(StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp)))(_ := _.digest)
 
   /** pipeline interface (initEn, cmd, res) of some SHA3Core to enable SLR allocation in implementation
