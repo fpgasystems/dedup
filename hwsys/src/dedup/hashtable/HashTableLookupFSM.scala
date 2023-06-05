@@ -104,7 +104,7 @@ case class HashTableLookupFSMIO(htConf: HashTableConfig) extends Bundle {
 
 case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends Component {
 
-  val rFSMId = Reg(UInt(log2Up(htConf.sizeFSMArray) bits)) init U(FSMId)
+  val rFSMId = Reg(UInt(log2Up(htConf.sizeFSMArray) bits)) init U(FSMId) allowUnsetRegToAvoidLatch
 
   val io = HashTableLookupFSMIO(htConf)
 
@@ -308,7 +308,6 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
     val resIsNormal       = (prevEntryValid) & (currentEntryValid)
 
     // control write back True => need to write back
-    val cntStayCycle              = Counter(2)
     val needMetaDataWriteBack     = Reg(Bool())
     val needCurrentEntryWriteBack = Reg(Bool())
     val needPrevEntryWriteBack    = Reg(Bool())

@@ -3,6 +3,8 @@ package dedup.deprecated
 import spinal.core._
 import spinal.lib._
 
+import dedup.DedupConfig
+
 object DedupCoreOp extends SpinalEnum(binarySequential) {
   val WRITE2FREE, ERASEREF, READSSD = newElement()
 }

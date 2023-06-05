@@ -2,27 +2,62 @@ package dedup
 
 import spinal.core._
 import spinal.lib._
+import spinal.lib.fsm._
 import spinal.lib.bus.amba4.axi._
+import spinal.crypto.hash.sha3._
 
 import util.Stream2StreamFragment
 import scala.util.Random
 
+import dedup.bloomfilter.BloomFilterConfig
+import dedup.bloomfilter.BloomFilterSubSystem
+import dedup.bloomfilter.BloomFilterLookupResEnum
+
+import dedup.hashtable.HashTableConfig
+
+object DedupCoreStatus extends SpinalEnum(binarySequential) {
+  val IDLE, OP_READY, WAIT_FOR_DATA, BUSY = newElement()
+}
+
 case class DedupConfig() {
-  val pgSize = 4 * 1024
-  val pgWord = pgSize / 64
+  /* general config */
+  val pgSize = 4 * 1024 // 4kiB
+  val wordSize = 64 // 64B
+
+  val wordSizeBit = wordSize * 8 // 512 bit
+  val pgWord = pgSize / wordSize // 64 word per page
+  assert(pgSize % wordSize == 0)
+
+  /*instr config*/
+  val instrTotalWidth = 512
+  val LBAWidth = 32
+  val hashInfoTotalWidth = 32 * 3 + 256
+
+  /* instr queue config */
+  val instrQueueLogDepth = List(2,6,6) // depth = 4,64,64
 
   /** config of submodules */
+  // Bloom Filter
+  // val bfConf = BloomFilterConfig(1 << log2Up(6432424), 3) // optimal value with 4096B page size, 10GB, 50% occupacy
+  val bfConf = BloomFilterConfig(1 << log2Up(131072), 3) // simulation test only, avoid long init time
+  // SHA3 
+  val sha3Conf = SHA3Config(dataWidth = 512, sha3Type = SHA3_256, groupSize = 64)
+
+  val htConf = HashTableConfig()
+
   val pageWriterConfig = PageWriterConfig()
 }
 
 case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
   /** input */
-  val pgStrmIn = slave Stream (Bits(512 bits))
+  val opStrmIn = slave Stream (Bits(conf.instrTotalWidth bits))
+  val pgStrmIn = slave Stream (Bits(conf.wordSizeBit bits))
   /** output */
   val pgResp = master Stream (PageWriterResp(conf.pageWriterConfig))
   /** control signals */
   val initEn = in Bool()
   val initDone = out Bool()
+  val status = out Bits(DedupCoreStatus().getBitsWidth bits)
 
   /** hashTab memory interface */
   val axiMem = master(Axi4(Axi4ConfigAlveo.u55cHBM))
@@ -35,55 +70,135 @@ class WrapDedupCore() extends Component {
 
   val dedupConf = DedupConfig()
   val io = WrapDedupCoreIO(dedupConf)
+  
+  // /* operation and instruction fetching */
+  // // val op = RegInit(DedupCoreOp.NOP)
+  // // val instrPgCount = Reg(UInt(dedupConf.instrPgCountWidth bits)) init(0)
 
-  /** fragmentize pgStream */
-  val pgStrmFrgm = Stream2StreamFragment(io.pgStrmIn, dedupConf.pgWord)
-  /** stream fork */
-  val (pgStrmBF, pgStrmSHA3, pgStrmSTORE) = StreamFork3(pgStrmFrgm)
+  // // val execPgCount = Reg(UInt(dedupConf.instrPgCountWidth bits)) init(0)
 
-  /** modules */
-  val bFilter = new BloomFilterCRC()
-  val sha3Grp = new SHA3Group()
-  val hashTab = new HashTab()
-  val pgWriter = new PageWriter(PageWriterConfig())
+  // // val dedupCoreIFFSM = new StateMachine {
+  // //   val IDLE                                = new State with EntryPoint
+  // //   val OP_READY, WAIT_FOR_DATA, BUSY       = new State
 
-  /** bloom filter */
-  bFilter.io.frgmIn.translateFrom(pgStrmBF)((a, b) => {
-    /** use the lsb 32b of the input 512b for CRC */
-    a.fragment := b.fragment(bFilter.bfConf.dataWidth-1 downto 0)
-    a.last := b.last
-  })
-  /** fork the bloom filter result (bool) to SHA and Store module */
-  val (bFilterRes2SHA, bFilterRes2Store) = StreamFork2(bFilter.io.res)
+  // //   // initialize
+  // //   io.opStrmIn.setBlocked()
+  // //   io.status := DedupCoreStatus.IDLE.asBits
 
-  /** SHA3 group: 64 SHA3 modules to keep the line rate */
-  sha3Grp.io.frgmIn << pgStrmSHA3
-  // sha3Grp.io.res
+  // //   // IDLE: op not ready, will not do anything
+  // //   IDLE.whenIsActive {
+  // //     io.status := DedupCoreStatus.IDLE.asBits
+      
+  // //     when(io.initEn){
+  // //       // detach
+  // //       io.opStrmIn.setBlocked()
+  // //     }.elsewhen(io.initDone){
+  // //       // connect to op stream
+  // //       io.opStrmIn.ready := True
 
-  /** Hash table for page SHA3 values
-   *  queue the bFilterRes2SHA here because the result latency in SHA3Grp
-   */
-  hashTab.io.cmd.translateFrom(StreamJoin(bFilterRes2SHA.queue(128), sha3Grp.io.res.queue(128)))((a, b) => {
-    a.verb := b._1 ? HashTabVerb.LOOKUP | HashTabVerb.INSERT
-    a.hashVal := b._2
-    a.isPostInst := False
-  })
-  hashTab.io.ptrStrm1 << pgWriter.io.ptrStrm1
-  hashTab.io.ptrStrm2 << pgWriter.io.ptrStrm2
-  hashTab.io.res >> pgWriter.io.lookupRes
-  hashTab.io.axiMem <> io.axiMem
+  // //       when(io.opStrmIn.fire){
+  // //         op.assignFromBits(io.opStrmIn.payload(dedupConf.instrPgCountWidth, DedupCoreOp().getBitsWidth bits))
+  // //         instrPgCount := io.opStrmIn.payload(0, dedupConf.instrPgCountWidth bits).asUInt
+  // //         goto(OP_READY)
+  // //       }
+  // //     }
+  // //   }
 
-  /** pageWriter */
-  pgWriter.io.frgmIn << pgStrmSTORE
-  pgWriter.io.bfRes << bFilterRes2Store
-  pgWriter.io.res >> io.pgResp
-  pgWriter.io.factorThrou := io.factorThrou
+  // //   //  op is ready
+  // //   OP_READY.whenIsActive {
+  // //     io.status := DedupCoreStatus.OP_READY.asBits
+  // //     // detach op, wait for data
+  // //     io.opStrmIn.setBlocked()
+      
+  // //     when(io.initEn){
+  // //       goto(IDLE)
+  // //     }.elsewhen(op === DedupCoreOp.NOP | instrPgCount === 0){
+  // //       goto(IDLE)
+  // //     }.otherwise{
+  // //       goto(WAIT_FOR_DATA)
+  // //     }
+  // //   }
 
-  /** init signals */
-  bFilter.io.initEn := io.initEn
-  sha3Grp.io.initEn := io.initEn
-  hashTab.io.initEn := io.initEn
-  pgWriter.io.initEn := io.initEn
-  io.initDone := bFilter.io.initDone & hashTab.io.initDone
+  // //   // WAIT FOR DATA, op is ready, data is not ready 
+  // //   WAIT_FOR_DATA.whenIsActive {
+  // //     io.status := DedupCoreStatus.WAIT_FOR_DATA.asBits
+      
+  // //     when(io.initEn){
+  // //       goto(IDLE)
+  // //     }.otherwise{
+  // //       when(io.pgStrmIn.fire) (goto(BUSY))
+  // //     }
+  // //   }
+
+  // //   // BUSY, consuming data
+  // //   BUSY.whenIsActive {
+  // //     io.status := DedupCoreStatus.BUSY.asBits
+
+  // //     when(io.initEn){
+  // //       goto(IDLE)
+  // //     }.otherwise{
+  // //       when(io.pgStrmIn.ready === True & io.pgStrmIn.valid === False){
+  // //         goto(WAIT_FOR_DATA)
+  // //       }.elsewhen(False){
+  // //         goto(IDLE)
+  // //       }
+  // //     }
+  // //   }
+  // // }
+
+
+  // /** fragmentize pgStream */
+  // // val dataTransContinueCond = dedupCoreIFFSM.isActive(dedupCoreIFFSM.WAIT_FOR_DATA) | dedupCoreIFFSM.isActive(dedupCoreIFFSM.BUSY)
+  // // val pgStrmFrgm = Stream2StreamFragment(io.pgStrmIn.continueWhen(dataTransContinueCond), dedupConf.pgWord)
+  // val pgStrmFrgm = Stream2StreamFragment(io.pgStrmIn, dedupConf.pgWord)
+  // /** stream fork */
+  // val (pgStrmBloomFilterSS, pgStrmHashTableSS, pgStrmPageWriter) = StreamFork3(pgStrmFrgm)
+  // val (opStrmBloomFilterSS, opStrmHashTableSS, opStrmPageWriter) = StreamFork3(io.opStrmIn)
+
+  // /** modules */
+  // val bFilterSS = new BloomFilterSubSystem(dedupConf)
+  // val sha3Grp   = new SHA3Group(dedupConf.sha3Conf)
+  // val hashTab   = new HashTableSubSystem()
+  // // val pgWriter = new PageWriter(PageWriterConfig(), dedupConf.instrPgCountWidth)
+  // val pgWriter = new PageWriter(PageWriterConfig())
+
+  // /** bloom filter */
+  // bFilterSS.io.opStrmIn     << opStrmBloomFilterSS
+  // bFilterSS.io.pgStrmFrgmIn << pgStrmBloomFilterSS
+
+  // /** fork the bloom filter result (bool) to SHA and Store module */
+  // val (bFilterRes2SHA, bFilterRes2Store) = StreamFork2(bFilterSS.io.res)
+
+  // /** SHA3 group: 64 SHA3 modules to keep the line rate */
+  // sha3Grp.io.frgmIn << pgStrmHashTableSS
+  // // sha3Grp.io.res
+
+  // /** Hash table for page SHA3 values
+  //  *  queue the bFilterRes2SHA here because the result latency in SHA3Grp
+  //  */
+  // hashTab.io.cmd.translateFrom(StreamJoin(bFilterRes2SHA.queue(128), sha3Grp.io.res.queue(128)))((a, b) => {
+  //   a.verb := (b._1.lookupRes === BloomFilterLookupResEnum.IS_EXIST) ? HashTabVerb.LOOKUP | HashTabVerb.INSERT
+  //   a.hashVal := b._2
+  //   a.isPostInst := False
+  // })
+  // hashTab.io.ptrStrm1 << pgWriter.io.ptrStrm1
+  // hashTab.io.ptrStrm2 << pgWriter.io.ptrStrm2
+  // hashTab.io.res >> pgWriter.io.lookupRes
+  // hashTab.io.axiMem <> io.axiMem
+
+  // /** pageWriter */
+  // pgWriter.io.frgmIn << pgStrmPageWriter
+  // pgWriter.io.bfRes << Stream(Bool()).translateFrom(bFilterRes2Store){(a,b) =>
+  //   a := (b.lookupRes === BloomFilterLookupResEnum.IS_EXIST)
+  // }
+  // pgWriter.io.res >> io.pgResp
+  // pgWriter.io.factorThrou := io.factorThrou
+
+  // /** init signals */
+  // bFilterSS.io.initEn := io.initEn
+  // sha3Grp.io.initEn := io.initEn
+  // hashTab.io.initEn := io.initEn
+  // pgWriter.io.initEn := io.initEn
+  // io.initDone := bFilterSS.io.initDone & hashTab.io.initDone
 
 }

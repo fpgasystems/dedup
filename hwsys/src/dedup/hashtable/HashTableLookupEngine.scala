@@ -4,6 +4,7 @@ package hashtable
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axi._
+import util.ReverseStreamArbiterFactory
 
 /* Lookup Engine = Arbitration logic + FSM array + lock table 
   make sure seq instr in, seq res out in same order*/
@@ -30,7 +31,7 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
   val cmdQDepth = 4
   
   // lookup engine settings
-  val sizeFSMArray = 1
+  val sizeFSMArray = 2
 }
 
 case class HashTableLookupEngineIO(htConf: HashTableConfig) extends Bundle {
@@ -54,34 +55,49 @@ case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
   /** default status of streams */
   io.instrStrmIn.setBlocked()
   io.res.setIdle()
+  io.mallocIdx.setBlocked()
+  io.freeIdx.setIdle()
   io.axiMem.setIdle()
 
-  /** Resource */
-  val rInitDone = RegInit(False)
-  io.initDone := rInitDone
-
-  val memInitializer = new HashTableMemInitializer(htConf)
+  val memInitializer = HashTableMemInitializer(htConf)
 
   val dispatchedInstrStream = StreamDispatcherSequential(io.instrStrmIn, htConf.sizeFSMArray)
 
   val fsmResBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMRes(htConf), 4))
+
+  val lockManager = HashTableLookupLockManager(htConf)
+
   val fsmArray = Array.tabulate(htConf.sizeFSMArray){idx => 
-    val fsmInstance = new HashTableLookupFSM(htConf,idx)
+    val fsmInstance = HashTableLookupFSM(htConf,idx)
     // connect instr dispatcher to fsm
     dispatchedInstrStream(idx).queue(4) >> fsmInstance.io.instrStrmIn
     // connect fsm results to output
+    fsmInstance.io.initEn := io.initEn
     fsmInstance.io.res >> fsmResBufferArray(idx).io.push
+    fsmInstance.io.lockReq >> lockManager.io.fsmArrayLockReq(idx)
+    fsmInstance.io.axiMem >> lockManager.io.fsmArrayDRAMReq(idx)
     fsmInstance
   }
 
   io.res << StreamArbiterFactory.sequentialOrder.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmResBufferArray(idx).io.pop))
-  // val resMerger = new Area{
-  //   val fsmSelect = Counter(htConf.sizeFSMArray, io.res.fire)
-  //   val dispatchedInstrStream = StreamDemux(io.instrStrmIn, fsmSelect, htConf.sizeFSMArray)
-  // }
 
-  // val lockTable
+  io.freeIdx << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.freeIdx))
 
+  // connect mallocIdx to fsmArray using roundRobin, but arbitrate on ready signal
+  // impl by modifying StreamArbiterFactory.roundRobin.transactionLock
+  io.mallocIdx >> ReverseStreamArbiterFactory().roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.mallocIdx))
 
+  // initialization logic
+  memInitializer.io.initEn := io.initEn
+  val isMemInitDone = memInitializer.io.initDone
+  io.initDone := isMemInitDone
 
+  // arbitrate AXI connection
+  when(!isMemInitDone){
+    memInitializer.io.axiMem >> io.axiMem
+    lockManager.io.axiMem.setBlocked()
+  }.otherwise{
+    memInitializer.io.axiMem.setBlocked()
+    lockManager.io.axiMem >> io.axiMem
+  }
 }

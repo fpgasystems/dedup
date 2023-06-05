@@ -25,17 +25,17 @@ object GenSHA3Core_Std {
     }
 }
 
-object GenBloomFilterCRC {
-  // import config if exists
-  def main(args: Array[String]): Unit =
-    MySpinalConfig
-      .generateVerilog({
-        val top = new BloomFilterCRC()
-        top.setDefinitionName("dedup_bloomfiltercrc")
-        top
-      })
-      .printPruned()
-}
+// object GenBloomFilterCRC {
+//   // import config if exists
+//   def main(args: Array[String]): Unit =
+//     MySpinalConfig
+//       .generateVerilog({
+//         val top = new BloomFilterCRC()
+//         top.setDefinitionName("dedup_bloomfiltercrc")
+//         top
+//       })
+//       .printPruned()
+// }
 
 object GenDefault {
   def main(args: Array[String]): Unit =
