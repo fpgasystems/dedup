@@ -31,7 +31,7 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
   val cmdQDepth = 4
   
   // lookup engine settings
-  val sizeFSMArray = 2
+  val sizeFSMArray = 8
 }
 
 case class HashTableLookupEngineIO(htConf: HashTableConfig) extends Bundle {

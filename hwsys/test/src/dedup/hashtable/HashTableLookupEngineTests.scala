@@ -30,9 +30,10 @@ class HashTableLookupEngineTests extends AnyFunSuite {
 
 object HashTableSimpleLookupEngineTBSim {
   def doSim(dut: HashTableSimpleLookupEngineTB, verbose: Boolean = false): Unit = {
-    val randomWithSeed = new Random(1006045258)
+    // val randomWithSeed = new Random(1006045258)
+    val randomWithSeed = new Random()
     dut.clockDomain.forkStimulus(period = 2)
-    SimTimeout(1000000)
+    SimTimeout(2000000)
     dut.io.initEn            #= false 
     dut.io.instrStrmIn.valid #= false
     dut.io.res.ready         #= false
@@ -53,12 +54,14 @@ object HashTableSimpleLookupEngineTBSim {
     /** generate page stream */
     val htConf = HashTableLookupHelpers.htConf
     val numBucketUsed = 64
-    val bucketAvgLen = 2
+    val bucketAvgLen = 8
     val numUniqueSHA3 = numBucketUsed * bucketAvgLen
 
-    val uniqueSHA3refCount = 2
+    val uniqueSHA3refCount = 4
 
-    val uniqueSHA3 = List.fill[BigInt](numUniqueSHA3)(BigInt(256, randomWithSeed))
+    assert(numBucketUsed <= htConf.nBucket)
+    val bucketMask = ((BigInt(1) << (log2Up( htConf.nBucket) - log2Up(numBucketUsed)) - 1) << log2Up(numBucketUsed))
+    val uniqueSHA3 = List.fill[BigInt](numUniqueSHA3)(BigInt(256, randomWithSeed) &~ bucketMask)
 
     val goldenHashTableRefCountLayout = ListBuffer.fill[BigInt](numUniqueSHA3)(0)
     val goldenHashTableSSDLBALayout = ListBuffer.fill[BigInt](numUniqueSHA3)(0)
@@ -120,13 +123,14 @@ object HashTableSimpleLookupEngineTBSim {
     /* Stimuli injection */
     val instrStrmPush = fork {
       for (instrIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        dut.clockDomain.waitSampling(63)
         dut.io.instrStrmIn.sendData(dut.clockDomain, instrStrmData(instrIdx))
       }
     }
 
     /* pseudo malloc*/
     val pseudoMallocIdxPush = fork {
-      for (newBlkIdx <- 0 until maxAllocRound * htConf.sizeFSMArray) {
+      for (newBlkIdx <- 0 until (32 + maxAllocRound) * htConf.sizeFSMArray) {
         dut.io.mallocIdx.sendData(dut.clockDomain, BigInt(newBlkIdx+1))
       }
     }
@@ -190,8 +194,8 @@ case class HashTableSimpleLookupEngineTB() extends Component{
   val dispatchedInstrStream = StreamDispatcherSequential(io.instrStrmIn, htConf.sizeFSMArray)
   val dispatchedMallocIdxStream = StreamDispatcherSequential(io.mallocIdx, htConf.sizeFSMArray)
 
-  val fsmResBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMRes(htConf), 4))
-  val fsmFreeIdxBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(UInt(htConf.ptrWidth bits), 8))
+  val fsmResBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMRes(htConf), 32))
+  val fsmFreeIdxBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(UInt(htConf.ptrWidth bits), 32))
 
   val lockManager = HashTableLookupLockManager(htConf)
 
@@ -199,7 +203,7 @@ case class HashTableSimpleLookupEngineTB() extends Component{
     val fsmInstance = HashTableLookupFSM(htConf,idx)
     // connect instr dispatcher to fsm
     dispatchedInstrStream(idx).queue(4) >> fsmInstance.io.instrStrmIn
-    dispatchedMallocIdxStream(idx).queue(4) >> fsmInstance.io.mallocIdx
+    dispatchedMallocIdxStream(idx).queue(32) >> fsmInstance.io.mallocIdx
     // connect fsm results to output
     fsmInstance.io.initEn := io.initEn
     fsmInstance.io.res >> fsmResBufferArray(idx).io.push

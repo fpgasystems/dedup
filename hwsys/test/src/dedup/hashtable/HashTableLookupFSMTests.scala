@@ -36,7 +36,8 @@ case class execRes(SHA3Hash: BigInt, RefCount: BigInt, SSDLBA: BigInt, opCode: B
 object HashTableFSMTBSim {
 
   def doSim(dut: HashTableLookupFSMTB, verbose: Boolean = false): Unit = {
-    val randomWithSeed = new Random(1006045258)
+    // val randomWithSeed = new Random(1006045258)
+    val randomWithSeed = new Random()
     dut.clockDomain.forkStimulus(period = 2)
     SimTimeout(1000000)
     dut.io.initEn            #= false 
@@ -57,11 +58,11 @@ object HashTableFSMTBSim {
     dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
     /** generate page stream */
-    val numBucketUsed = 64
-    val bucketAvgLen = 4
+    val numBucketUsed = 8
+    val bucketAvgLen = 2
     val numUniqueSHA3 = numBucketUsed * bucketAvgLen
 
-    val uniqueSHA3refCount = 4
+    val uniqueSHA3refCount = 16
 
     val uniqueSHA3 = List.fill[BigInt](numUniqueSHA3)(BigInt(256, randomWithSeed))
 
@@ -159,8 +160,8 @@ object HashTableFSMTBSim {
 }
 
 object HashTableLookupHelpers{
-  // 16 bucket x 32 entry/bucket = 1<<9 hash table
-  val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = (1<<9), expBucketSize = 32, hashTableOffset = 0)
+  // 128 bucket x 32 entry/bucket = 1<<12 hash table
+  val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = (1<<12), expBucketSize = 32, hashTableOffset = 0)
 
   def insertInstrGen(SHA3 : BigInt) : BigInt = {
     val sha3_trunc = SimHelpers.bigIntTruncVal(SHA3, 255, 0)

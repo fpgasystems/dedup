@@ -35,7 +35,13 @@ case class HashTableLookupLockManager(htConf: HashTableConfig) extends Component
   val io = HashTableLookupLockManagerIO(htConf)
 
   val fsmLockReq = StreamArbiterFactory.roundRobin.transactionLock.on(io.fsmArrayLockReq)
-  val parkingQueue = new StreamFifo(FSMLockRequest(htConf), 4)
+
+  /*Parking Queue cannot be too shallow
+    if all colide and lock acquire requests cannot fit into parking queue,
+    the lock release request will be blocked and never be issued
+    so a safe way to do this is to set the depth as the number of FSMs(= max outstanding request)
+    */
+  val parkingQueue = new StreamFifo(FSMLockRequest(htConf), htConf.sizeFSMArray)
   
   val lockTable = Vec(Reg(lockTableContent(htConf)), htConf.sizeFSMArray)
   lockTable.foreach{ content =>
@@ -92,9 +98,26 @@ case class HashTableLookupLockManager(htConf: HashTableConfig) extends Component
   }
 
   // write, round robin access
-  io.axiMem.aw << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).aw))
-  io.axiMem.w  << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).w ))
+  // io.axiMem.aw << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).aw))
+  // io.axiMem.w  << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).w ))
   io.axiMem.ar << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).ar))
+  
+  val arbitratedWriteCmdStrm =  StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).aw))
+
+  val (writeCmdToAxi, writeCmdToSelect) = StreamFork2(arbitratedWriteCmdStrm)
+  io.axiMem.aw << writeCmdToAxi
+
+  val writeDataArbitrationStrm = writeCmdToSelect.stage()
+  writeDataArbitrationStrm.ready :=  io.axiMem.w.fire & io.axiMem.w.payload.last
+  // arbitrate w(writeData) using aw(writeCmd), they need to be in same order
+  io.axiMem.w.setIdle()
+  for (idx <- 0 until htConf.sizeFSMArray){
+    when(writeDataArbitrationStrm.valid & (writeDataArbitrationStrm.payload.id === idx)){
+      io.axiMem.w << activeFSMArrayDRAMReq(idx).w
+    } otherwise {
+      activeFSMArrayDRAMReq(idx).w.setBlocked()
+    }
+  }
   
   // back, dispatch based on id
   val axiReadRspDispatcher = StreamDemux(io.axiMem.r, io.axiMem.r.payload.id.resized, htConf.sizeFSMArray)
