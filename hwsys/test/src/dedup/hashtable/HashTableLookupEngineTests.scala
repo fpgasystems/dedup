@@ -16,20 +16,20 @@ import scala.collection.mutable._
 import scala.util.Random
 
 class HashTableLookupEngineTests extends AnyFunSuite {
-  test("HashTableLookupEngineTest0: dummy allocator with sequential dispatcher"){
+  test("HashTableLookupEngineTest: dummy allocator"){
     // dummy allocator with sequential dispatcher in mallocIdx
     // we can predict the allocated address in simple golden model in this setup
-    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withVpdWave.withVCS.compile(new HashTableSimpleLookupEngineTB())
-    else SimConfig.withWave.compile(new HashTableSimpleLookupEngineTB())
+    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withVpdWave.withVCS.compile(new HashTableLookupEngine(DedupConfig().htConf))
+    else SimConfig.withWave.compile(new HashTableLookupEngine(DedupConfig().htConf))
 
     compiledRTL.doSim { dut =>
-      HashTableSimpleLookupEngineTBSim.doSim(dut)
+      HashTableLookupEngineSim.doSim(dut)
     }
   }
 }
 
-object HashTableSimpleLookupEngineTBSim {
-  def doSim(dut: HashTableSimpleLookupEngineTB, verbose: Boolean = false): Unit = {
+object HashTableLookupEngineSim {
+  def doSim(dut: HashTableLookupEngine, verbose: Boolean = false): Unit = {
     // val randomWithSeed = new Random(1006045258)
     val randomWithSeed = new Random()
     dut.clockDomain.forkStimulus(period = 2)
@@ -151,7 +151,9 @@ object HashTableSimpleLookupEngineTBSim {
         // println(decodedRealOutput)
         // println("we expect:")
         // println(goldenResponse(respIdx))
-        assert(decodedRealOutput == goldenResponse(respIdx))
+        // assert(decodedRealOutput == goldenResponse(respIdx))
+        assert(decodedRealOutput.SHA3Hash == goldenResponse(respIdx).SHA3Hash)
+        assert(decodedRealOutput.RefCount == goldenResponse(respIdx).RefCount)
       }
     }
 

@@ -10,10 +10,16 @@ import util.Stream2StreamFragment
 import scala.util.Random
 
 import dedup.bloomfilter.BloomFilterConfig
-import dedup.bloomfilter.BloomFilterSubSystem
-import dedup.bloomfilter.BloomFilterLookupResEnum
+// import dedup.bloomfilter.BloomFilterSubSystem
+// import dedup.bloomfilter.BloomFilterLookupResEnum
 
 import dedup.hashtable.HashTableConfig
+import dedup.hashtable.HashTableSubSystem
+
+import dedup.pagewriter.PageWriterConfig
+import dedup.pagewriter.PageWriterResp
+import dedup.pagewriter.SSDInstr
+import dedup.pagewriter.PageWriterSubSystem
 
 object DedupCoreStatus extends SpinalEnum(binarySequential) {
   val IDLE, OP_READY, WAIT_FOR_DATA, BUSY = newElement()
@@ -43,9 +49,10 @@ case class DedupConfig() {
   // SHA3 
   val sha3Conf = SHA3Config(dataWidth = 512, sha3Type = SHA3_256, groupSize = 64)
 
-  val htConf = HashTableConfig()
+  // 64 bucket x 32 entry/bucket = 1<<11 hash table
+  val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = (1<<11), expBucketSize = 32, hashTableOffset = 0)
 
-  val pageWriterConfig = PageWriterConfig()
+  val pwConf = PageWriterConfig()
 }
 
 case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
@@ -53,14 +60,18 @@ case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
   val opStrmIn = slave Stream (Bits(conf.instrTotalWidth bits))
   val pgStrmIn = slave Stream (Bits(conf.wordSizeBit bits))
   /** output */
-  val pgResp = master Stream (PageWriterResp(conf.pageWriterConfig))
+  val pgResp   = master Stream (PageWriterResp(conf))
   /** control signals */
-  val initEn = in Bool()
+  val initEn   = in Bool()
   val initDone = out Bool()
-  val status = out Bits(DedupCoreStatus().getBitsWidth bits)
 
   /** hashTab memory interface */
-  val axiMem = master(Axi4(Axi4ConfigAlveo.u55cHBM))
+  val axiMem   = master(Axi4(Axi4ConfigAlveo.u55cHBM))
+  
+  // SSD Intf for TB
+  val SSDDataIn  = master Stream (Fragment(Bits(conf.wordSizeBit bits)))
+  val SSDDataOut = slave Stream (Fragment(Bits(conf.wordSizeBit bits)))
+  val SSDInstrIn = master Stream (SSDInstr(conf))
 
   /** pgStore throughput control factor */
   val factorThrou = in UInt(5 bits)
@@ -70,135 +81,41 @@ class WrapDedupCore() extends Component {
 
   val dedupConf = DedupConfig()
   val io = WrapDedupCoreIO(dedupConf)
-  
-  // /* operation and instruction fetching */
-  // // val op = RegInit(DedupCoreOp.NOP)
-  // // val instrPgCount = Reg(UInt(dedupConf.instrPgCountWidth bits)) init(0)
 
-  // // val execPgCount = Reg(UInt(dedupConf.instrPgCountWidth bits)) init(0)
+  /** fragmentize pgStream */
+  // val dataTransContinueCond = dedupCoreIFFSM.isActive(dedupCoreIFFSM.WAIT_FOR_DATA) | dedupCoreIFFSM.isActive(dedupCoreIFFSM.BUSY)
+  // val pgStrmFrgm = Stream2StreamFragment(io.pgStrmIn.continueWhen(dataTransContinueCond), dedupConf.pgWord)
+  val pgStrmFrgm = Stream2StreamFragment(io.pgStrmIn, dedupConf.pgWord)
+  /** stream fork */
+  val (pgStrmHashTableSS, pgStrmPageWriterSS) = StreamFork2(pgStrmFrgm)
+  val (opStrmHashTableSS, opStrmPageWriterSS) = StreamFork2(io.opStrmIn)
 
-  // // val dedupCoreIFFSM = new StateMachine {
-  // //   val IDLE                                = new State with EntryPoint
-  // //   val OP_READY, WAIT_FOR_DATA, BUSY       = new State
+  /** modules */
+  val hashTableSS = new HashTableSubSystem(dedupConf)
+  // val pgWriter = new PageWriter(PageWriterConfig(), dedupConf.instrPgCountWidth)
+  val pgWriterSS = new PageWriterSubSystem(dedupConf)
 
-  // //   // initialize
-  // //   io.opStrmIn.setBlocked()
-  // //   io.status := DedupCoreStatus.IDLE.asBits
+  // data and instr
+  hashTableSS.io.opStrmIn     << opStrmHashTableSS
+  hashTableSS.io.pgStrmFrgmIn << pgStrmHashTableSS
 
-  // //   // IDLE: op not ready, will not do anything
-  // //   IDLE.whenIsActive {
-  // //     io.status := DedupCoreStatus.IDLE.asBits
-      
-  // //     when(io.initEn){
-  // //       // detach
-  // //       io.opStrmIn.setBlocked()
-  // //     }.elsewhen(io.initDone){
-  // //       // connect to op stream
-  // //       io.opStrmIn.ready := True
+  pgWriterSS.io.opStrmIn      << opStrmPageWriterSS
+  pgWriterSS.io.pgStrmFrgmIn  << pgStrmPageWriterSS
 
-  // //       when(io.opStrmIn.fire){
-  // //         op.assignFromBits(io.opStrmIn.payload(dedupConf.instrPgCountWidth, DedupCoreOp().getBitsWidth bits))
-  // //         instrPgCount := io.opStrmIn.payload(0, dedupConf.instrPgCountWidth bits).asUInt
-  // //         goto(OP_READY)
-  // //       }
-  // //     }
-  // //   }
+  // hash table: res and axi
+  hashTableSS.io.res    >> pgWriterSS.io.lookupRes
+  hashTableSS.io.axiMem >> io.axiMem
 
-  // //   //  op is ready
-  // //   OP_READY.whenIsActive {
-  // //     io.status := DedupCoreStatus.OP_READY.asBits
-  // //     // detach op, wait for data
-  // //     io.opStrmIn.setBlocked()
-      
-  // //     when(io.initEn){
-  // //       goto(IDLE)
-  // //     }.elsewhen(op === DedupCoreOp.NOP | instrPgCount === 0){
-  // //       goto(IDLE)
-  // //     }.otherwise{
-  // //       goto(WAIT_FOR_DATA)
-  // //     }
-  // //   }
+  //page writer: res to host and to SSD(only in tb)
+  pgWriterSS.io.SSDDataIn   >> io.SSDDataIn 
+  pgWriterSS.io.SSDDataOut  << io.SSDDataOut
+  pgWriterSS.io.SSDInstrIn  >> io.SSDInstrIn
+  pgWriterSS.io.res         >> io.pgResp
+  pgWriterSS.io.factorThrou := io.factorThrou
 
-  // //   // WAIT FOR DATA, op is ready, data is not ready 
-  // //   WAIT_FOR_DATA.whenIsActive {
-  // //     io.status := DedupCoreStatus.WAIT_FOR_DATA.asBits
-      
-  // //     when(io.initEn){
-  // //       goto(IDLE)
-  // //     }.otherwise{
-  // //       when(io.pgStrmIn.fire) (goto(BUSY))
-  // //     }
-  // //   }
-
-  // //   // BUSY, consuming data
-  // //   BUSY.whenIsActive {
-  // //     io.status := DedupCoreStatus.BUSY.asBits
-
-  // //     when(io.initEn){
-  // //       goto(IDLE)
-  // //     }.otherwise{
-  // //       when(io.pgStrmIn.ready === True & io.pgStrmIn.valid === False){
-  // //         goto(WAIT_FOR_DATA)
-  // //       }.elsewhen(False){
-  // //         goto(IDLE)
-  // //       }
-  // //     }
-  // //   }
-  // // }
-
-
-  // /** fragmentize pgStream */
-  // // val dataTransContinueCond = dedupCoreIFFSM.isActive(dedupCoreIFFSM.WAIT_FOR_DATA) | dedupCoreIFFSM.isActive(dedupCoreIFFSM.BUSY)
-  // // val pgStrmFrgm = Stream2StreamFragment(io.pgStrmIn.continueWhen(dataTransContinueCond), dedupConf.pgWord)
-  // val pgStrmFrgm = Stream2StreamFragment(io.pgStrmIn, dedupConf.pgWord)
-  // /** stream fork */
-  // val (pgStrmBloomFilterSS, pgStrmHashTableSS, pgStrmPageWriter) = StreamFork3(pgStrmFrgm)
-  // val (opStrmBloomFilterSS, opStrmHashTableSS, opStrmPageWriter) = StreamFork3(io.opStrmIn)
-
-  // /** modules */
-  // val bFilterSS = new BloomFilterSubSystem(dedupConf)
-  // val sha3Grp   = new SHA3Group(dedupConf.sha3Conf)
-  // val hashTab   = new HashTableSubSystem()
-  // // val pgWriter = new PageWriter(PageWriterConfig(), dedupConf.instrPgCountWidth)
-  // val pgWriter = new PageWriter(PageWriterConfig())
-
-  // /** bloom filter */
-  // bFilterSS.io.opStrmIn     << opStrmBloomFilterSS
-  // bFilterSS.io.pgStrmFrgmIn << pgStrmBloomFilterSS
-
-  // /** fork the bloom filter result (bool) to SHA and Store module */
-  // val (bFilterRes2SHA, bFilterRes2Store) = StreamFork2(bFilterSS.io.res)
-
-  // /** SHA3 group: 64 SHA3 modules to keep the line rate */
-  // sha3Grp.io.frgmIn << pgStrmHashTableSS
-  // // sha3Grp.io.res
-
-  // /** Hash table for page SHA3 values
-  //  *  queue the bFilterRes2SHA here because the result latency in SHA3Grp
-  //  */
-  // hashTab.io.cmd.translateFrom(StreamJoin(bFilterRes2SHA.queue(128), sha3Grp.io.res.queue(128)))((a, b) => {
-  //   a.verb := (b._1.lookupRes === BloomFilterLookupResEnum.IS_EXIST) ? HashTabVerb.LOOKUP | HashTabVerb.INSERT
-  //   a.hashVal := b._2
-  //   a.isPostInst := False
-  // })
-  // hashTab.io.ptrStrm1 << pgWriter.io.ptrStrm1
-  // hashTab.io.ptrStrm2 << pgWriter.io.ptrStrm2
-  // hashTab.io.res >> pgWriter.io.lookupRes
-  // hashTab.io.axiMem <> io.axiMem
-
-  // /** pageWriter */
-  // pgWriter.io.frgmIn << pgStrmPageWriter
-  // pgWriter.io.bfRes << Stream(Bool()).translateFrom(bFilterRes2Store){(a,b) =>
-  //   a := (b.lookupRes === BloomFilterLookupResEnum.IS_EXIST)
-  // }
-  // pgWriter.io.res >> io.pgResp
-  // pgWriter.io.factorThrou := io.factorThrou
-
-  // /** init signals */
-  // bFilterSS.io.initEn := io.initEn
-  // sha3Grp.io.initEn := io.initEn
-  // hashTab.io.initEn := io.initEn
-  // pgWriter.io.initEn := io.initEn
-  // io.initDone := bFilterSS.io.initDone & hashTab.io.initDone
+  /** init signals */
+  hashTableSS.io.initEn := io.initEn
+  pgWriterSS.io.initEn  := io.initEn
+  io.initDone           := hashTableSS.io.initDone
 
 }

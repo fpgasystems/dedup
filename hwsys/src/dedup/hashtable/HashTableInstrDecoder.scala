@@ -4,30 +4,30 @@ package hashtable
 import spinal.core._
 import spinal.lib._
 
-case class decodedReadyInstr(conf: DedupConfig) extends Bundle{
-  val CRCHash = Vec(Bits(32 bits), conf.bfConf.k)
+case class DecodedReadyInstr(conf: DedupConfig) extends Bundle{
+  val SHA3Hash = Bits(conf.htConf.hashValWidth bits)
   val opCode = DedupCoreOp()
-  val tag = UInt(conf.bfConf.instrTagWidth bits)
+  val tag = UInt(conf.htConf.instrTagWidth bits)
 }
 
-case class decodedWaitingInstr(conf: DedupConfig) extends Bundle{
+case class DecodedWaitingInstr(conf: DedupConfig) extends Bundle{
   val pageCount = UInt(conf.LBAWidth bits)
   val opCode = DedupCoreOp()
-  val tag = UInt(conf.bfConf.instrTagWidth bits)
+  val tag = UInt(conf.htConf.instrTagWidth bits)
 }
 
 case class HashTableInstrDecoder(conf: DedupConfig) extends Component{
 
   val instrBitWidth = DedupCoreOp().getBitsWidth
-  val bfConf = conf.bfConf
+  val htConf = conf.htConf
 
   val io = new Bundle {
     /* input raw Instr Stream: 512bits*/
     val rawInstrStream = slave Stream (Bits(conf.instrTotalWidth bits))
 
     /* output instr stream */
-    val readyInstrStream = master Stream (decodedReadyInstr(conf)) 
-    val waitingInstrStream = master Stream (decodedWaitingInstr(conf))
+    val readyInstrStream = master Stream (DecodedReadyInstr(conf)) 
+    val waitingInstrStream = master Stream (DecodedWaitingInstr(conf))
   }
 
   // initialization
@@ -37,7 +37,7 @@ case class HashTableInstrDecoder(conf: DedupConfig) extends Component{
 
   val isNeededInstr = Bool() default(False)
 
-  val tagGenerator = Counter(bfConf.instrTagWidth bits, inc = isNeededInstr & io.rawInstrStream.fire)
+  val tagGenerator = Counter(htConf.instrTagWidth bits, inc = isNeededInstr & io.rawInstrStream.fire)
   
   val instrDispatcher = new Area {
     when(io.rawInstrStream.valid){

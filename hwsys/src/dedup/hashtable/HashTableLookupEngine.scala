@@ -8,32 +8,6 @@ import util.ReverseStreamArbiterFactory
 
 /* Lookup Engine = Arbitration logic + FSM array + lock table 
   make sure seq instr in, seq res out in same order*/
-
-case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTableSize: Int = (1<<20), expBucketSize: Int = 32, hashTableOffset: BigInt = 0) {
-  assert(hashTableSize%expBucketSize==0, "Hash table size (#entry) should be a multiple of bucketSize")
-  // #hash index
-  val idxBucketWidth = log2Up(hashTableSize / expBucketSize)
-  val nBucket = 1 << idxBucketWidth
-  // property of bucket metadata
-  val bucketMetaDataType = Bits(512 bits)
-  val bucketMetaDataByteSize = bucketMetaDataType.getBitsWidth/8
-  val bucketMetaDataAddrBitShift = log2Up(bucketMetaDataByteSize)
-
-  // property of one entry
-  val entryType = Bits(512 bits)
-  val entryByteSize = entryType.getBitsWidth/8
-  val entryAddrBitShift = log2Up(entryByteSize)
-  // memory offset (start of hash table content), minus 1 entry since no index 0.
-  val hashTableContentOffset = hashTableOffset + bucketMetaDataByteSize * nBucket - 1 * entryByteSize
-
-  // Lookup FSM settings
-  /** Hardware parameters (performance related) */
-  val cmdQDepth = 4
-  
-  // lookup engine settings
-  val sizeFSMArray = 8
-}
-
 case class HashTableLookupEngineIO(htConf: HashTableConfig) extends Bundle {
   val initEn      = in Bool()
   val initDone    = out Bool()
@@ -51,13 +25,6 @@ case class HashTableLookupEngineIO(htConf: HashTableConfig) extends Bundle {
 case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
 
   val io = HashTableLookupEngineIO(htConf)
-
-  /** default status of streams */
-  io.instrStrmIn.setBlocked()
-  io.res.setIdle()
-  io.mallocIdx.setBlocked()
-  io.freeIdx.setIdle()
-  io.axiMem.setIdle()
 
   val memInitializer = HashTableMemInitializer(htConf)
 

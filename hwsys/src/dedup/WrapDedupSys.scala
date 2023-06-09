@@ -39,9 +39,9 @@ class WrapDedupSys() extends Component with RenameIO {
 
   //Resp logic
   val pgRespPad = Stream(Bits(128 bits))
-  pgRespPad.translateFrom(dedupCore.io.pgResp)((a,b) => {
-    a := b.pgPtr.resize(64) ## (b.pgIdx ## b.isExist).resize(64)
-  })
+  // pgRespPad.translateFrom(dedupCore.io.pgResp)((a,b) => {
+  //   a := b.pgPtr.resize(64) ## (b.pgIdx ## b.isExist).resize(64)
+  // })
 
   /** SLR0 << SLR1 */
   hostIntf.io.pgResp << pgRespPad.pipelined(StreamPipe.FULL)

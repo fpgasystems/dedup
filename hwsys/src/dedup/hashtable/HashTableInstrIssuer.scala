@@ -1,33 +1,33 @@
 package dedup
-package bloomfilter
+package hashtable
 
 import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
 
-case class BloomFilterInstrIssuer(conf: DedupConfig) extends Component{
+case class HashTableInstrIssuer(conf: DedupConfig) extends Component{
 
   val instrBitWidth = DedupCoreOp().getBitsWidth
-  val bfConf = conf.bfConf
+  val htConf = conf.htConf
 
   val io = new Bundle {
     val initEn             = in Bool ()
     /* input instr stream */
     val readyInstrStream   = slave Stream (DecodedReadyInstr(conf)) 
     val waitingInstrStream = slave Stream (DecodedWaitingInstr(conf))
-    val CRCResStream       = slave Stream (Vec(Bits(32 bits), bfConf.k))
+    val SHA3ResStream      = slave Stream (Bits(conf.htConf.hashValWidth bits))
 
     /* output FSM instr stream */
-    val instrIssueStream = master Stream (BloomFilterLookupFSMInstr(bfConf))
+    val instrIssueStream = master Stream (HashTableLookupFSMInstr(conf.htConf))
   }
 
   // initialization
   io.readyInstrStream.setBlocked()
   io.waitingInstrStream.setBlocked()
-  // io.CRCResStream.setBlocked()
+  // io.SHA3ResStream.setBlocked()
   // io.instrIssueStream.setIdle()
 
-  val tagGenerator = Counter(bfConf.instrTagWidth bits)
+  val tagGenerator = Counter(htConf.instrTagWidth bits)
   
   when(io.initEn){
     tagGenerator.clear()
@@ -40,12 +40,12 @@ case class BloomFilterInstrIssuer(conf: DedupConfig) extends Component{
     val fire  = Bool() default (False)
 
     // payload assignment
-    payload.CRCHash := io.CRCResStream.payload
+    payload.SHA3Hash := io.SHA3ResStream.payload
     payload.opCode  := io.waitingInstrStream.opCode
     payload.tag     := io.waitingInstrStream.tag
 
-    valid := io.waitingInstrStream.valid & io.CRCResStream.valid
-    io.CRCResStream.ready     := ready
+    valid := io.waitingInstrStream.valid & io.SHA3ResStream.valid
+    io.SHA3ResStream.ready     := ready
 
     fire  := ready & valid
 
@@ -58,7 +58,7 @@ case class BloomFilterInstrIssuer(conf: DedupConfig) extends Component{
         slicingCounter.increment()
       }
       // waiting instruction: write, 10 pages
-      // fire this when CRC fire 10 times
+      // fire this when SHA3 fire 10 times
       io.waitingInstrStream.ready := ((io.waitingInstrStream.payload.pageCount - 1) === slicingCounter.value) & fire
 
       when(io.waitingInstrStream.fire){

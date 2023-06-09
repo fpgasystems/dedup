@@ -49,9 +49,9 @@ class BloomFilterSubSystem(conf : DedupConfig) extends Component {
   
   val instrDecoder = new BloomFilterInstrDecoder(conf)
 
-  val decodedWaitingInstrQueue = StreamFifo(decodedWaitingInstr(conf), 8)
+  val decodedWaitingInstrQueue = StreamFifo(DecodedWaitingInstr(conf), 8)
 
-  val decodedReadyInstrQueue = StreamFifo(decodedReadyInstr(conf), 8)
+  val decodedReadyInstrQueue = StreamFifo(DecodedReadyInstr(conf), 8)
 
   val instrIssuer = new BloomFilterInstrIssuer(conf)
 

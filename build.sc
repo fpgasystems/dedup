@@ -23,6 +23,9 @@ object hwsys extends CommonSpinalModule {
   object test extends Tests with TestModule.ScalaTest {
     override def ivyDeps = Agg(ivy"org.scalatest::scalatest:$scalaTestVersion")
     override def testFramework = "org.scalatest.tools.Framework"
+    // in openjdk 17.0.6, if multiple -Xmx arg are used, the last one will take the effect, check with
+    // java -version; java -Xmx1G -XX:+PrintFlagsFinal -Xmx2G 2>/dev/null | grep MaxHeapSize
+    // override def forkArgs = T { super.forkArgs() ++ Seq("-Xmx16g") }
     def testSim(args: String*) = T.command {
       super.runMain("org.scalatest.run", args: _*)
     }

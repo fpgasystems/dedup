@@ -54,18 +54,18 @@ case class READSSDInstr (conf: DedupConfig) extends Bundle{
   }
 }
 
-case class BloomFilterCRCInstr(conf: DedupConfig) extends Bundle{
-  val CRCHash = Vec(Bits(conf.bfConf.dataWidth bits), conf.bfConf.k)
-  val opCode = DedupCoreOp()
-}
+// case class BloomFilterCRCInstr(conf: DedupConfig) extends Bundle{
+//   val CRCHash = Vec(Bits(conf.bfConf.dataWidth bits), conf.bfConf.k)
+//   val opCode = DedupCoreOp()
+// }
 
-case class HashTableSHA3Instr(conf: DedupConfig) extends Bundle{
-  val SHA3Hash = Bits(conf.sha3Conf.resWidth bits)
-  val opCode = DedupCoreOp()
-}
+// case class HashTableSHA3Instr(conf: DedupConfig) extends Bundle{
+//   val SHA3Hash = Bits(conf.sha3Conf.resWidth bits)
+//   val opCode = DedupCoreOp()
+// }
 
-case class pageWriterInstr(conf: DedupConfig) extends Bundle{
-  val LBALen = UInt(conf.LBAWidth bits)
-  val LBA = UInt(conf.LBAWidth bits)
-  val opCode = DedupCoreOp()
-}
+// case class pageWriterInstr(conf: DedupConfig) extends Bundle{
+//   val LBALen = UInt(conf.LBAWidth bits)
+//   val LBA = UInt(conf.LBAWidth bits)
+//   val opCode = DedupCoreOp()
+// }
