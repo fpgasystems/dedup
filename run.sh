@@ -12,9 +12,14 @@ fi
 
 ./mill version
 
+# run all tests:
 #./mill hwsys.test
-./mill hwsys.test.testSim dedup.Sha3Tests
+
+# run specific test:
+# ./mill hwsys.test.testSim dedup.Sha3Tests
 #FIXME: CRCTests sometimes fail due to the sw reference issue
 # mill hwsys.test.testSim dedup.CRCTests
 
+# run specific main method(to generate 
+# mill hwsys.runMain dedup.GenDedupSys
 
