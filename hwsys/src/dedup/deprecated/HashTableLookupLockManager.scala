@@ -1,10 +1,11 @@
 package dedup
-package hashtable
+package deprecated
 
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axi._
 import util.Helpers.AxiUtils
+import hashtable.HashTableConfig
 
 object LockManagerOp extends SpinalEnum(binarySequential) {
   val ACQUIRE, RELEASE = newElement()
@@ -22,22 +23,16 @@ case class FSMLockRequest(htConf: HashTableConfig) extends Bundle {
 }
 
 case class HashTableLookupLockManagerIO(htConf: HashTableConfig) extends Bundle {
-  val axiConf         = Axi4ConfigAlveo.u55cHBM
+  val axiConf     = Axi4ConfigAlveo.u55cHBM
   // FSM array request
   val fsmArrayLockReq = Vec(slave Stream(FSMLockRequest(htConf)), htConf.sizeFSMArray)
   val fsmArrayDRAMReq = Vec(slave(Axi4(axiConf)), htConf.sizeFSMArray)
-  /** DRAM interface 
-   * multiple memory channels are enabled
-   * otherwise use complicated arbitration policy 
-   * as shown in deprecated.LockManager
-  */
-  val axiMem          = Vec(master(Axi4(axiConf)), htConf.sizeFSMArray)
+  /** DRAM interface */
+  val axiMem      = master(Axi4(axiConf))
 }
 
 case class HashTableLookupLockManager(htConf: HashTableConfig) extends Component {
-  /* This is the impl using multiple memory channel
-    channel count = # lookup FSM
-    simpler than the version in deprecated package, which uses only 1 channel
+  /* This is the impl using 1 memory channel
   */
 
   val io = HashTableLookupLockManagerIO(htConf)
@@ -95,7 +90,43 @@ case class HashTableLookupLockManager(htConf: HashTableConfig) extends Component
   }
 
   // axi connect
+  val activeFSMArrayDRAMReq = Vec(Axi4(io.axiConf), htConf.sizeFSMArray)
   for (FSMIdx <- 0 until htConf.sizeFSMArray){
-    io.fsmArrayDRAMReq(FSMIdx).continueWhen(lockTable(FSMIdx).lockIsActive) >> io.axiMem(FSMIdx)
+    // io.fsmArrayDRAMReq(FSMIdx).aw.continueWhen(lockTable(FSMIdx).lockIsActive) >> activeFSMArrayDRAMReq(FSMIdx).aw
+    // io.fsmArrayDRAMReq(FSMIdx).w .continueWhen(lockTable(FSMIdx).lockIsActive) >> activeFSMArrayDRAMReq(FSMIdx).w 
+    // io.fsmArrayDRAMReq(FSMIdx).ar.continueWhen(lockTable(FSMIdx).lockIsActive) >> activeFSMArrayDRAMReq(FSMIdx).ar
+    // io.fsmArrayDRAMReq(FSMIdx).b << activeFSMArrayDRAMReq(FSMIdx).b.continueWhen(lockTable(FSMIdx).lockIsActive)
+    // io.fsmArrayDRAMReq(FSMIdx).r << activeFSMArrayDRAMReq(FSMIdx).r.continueWhen(lockTable(FSMIdx).lockIsActive)
+    io.fsmArrayDRAMReq(FSMIdx).continueWhen(lockTable(FSMIdx).lockIsActive) >> activeFSMArrayDRAMReq(FSMIdx)
+  }
+
+  // write, round robin access
+  // io.axiMem.aw << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).aw))
+  // io.axiMem.w  << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).w ))
+  io.axiMem.ar << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).ar))
+  
+  val arbitratedWriteCmdStrm =  StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => activeFSMArrayDRAMReq(idx).aw))
+
+  val (writeCmdToAxi, writeCmdToSelect) = StreamFork2(arbitratedWriteCmdStrm)
+  io.axiMem.aw << writeCmdToAxi
+
+  val writeDataArbitrationStrm = writeCmdToSelect.queue(2)
+  writeDataArbitrationStrm.ready :=  io.axiMem.w.fire & io.axiMem.w.payload.last
+  // arbitrate w(writeData) using aw(writeCmd), they need to be in same order
+  io.axiMem.w.setIdle()
+  for (idx <- 0 until htConf.sizeFSMArray){
+    when(writeDataArbitrationStrm.valid & (writeDataArbitrationStrm.payload.id === idx)){
+      io.axiMem.w << activeFSMArrayDRAMReq(idx).w
+    } otherwise {
+      activeFSMArrayDRAMReq(idx).w.setBlocked()
+    }
+  }
+  
+  // back, dispatch based on id
+  val axiReadRspDispatcher = StreamDemux(io.axiMem.r, io.axiMem.r.payload.id.resized, htConf.sizeFSMArray)
+  val axiWriteRspDispatcher = StreamDemux(io.axiMem.b, io.axiMem.b.payload.id.resized, htConf.sizeFSMArray)
+  for (FSMIdx <- 0 until htConf.sizeFSMArray){
+    axiWriteRspDispatcher(FSMIdx) >> activeFSMArrayDRAMReq(FSMIdx).b
+    axiReadRspDispatcher(FSMIdx)  >> activeFSMArrayDRAMReq(FSMIdx).r
   }
 }

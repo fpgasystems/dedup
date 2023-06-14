@@ -49,8 +49,8 @@ case class DedupConfig() {
   // SHA3 
   val sha3Conf = SHA3Config(dataWidth = 512, sha3Type = SHA3_256, groupSize = 64)
 
-  // 64 bucket x 32 entry/bucket = 1<<11 hash table
-  val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = (1<<11), expBucketSize = 32, hashTableOffset = 0)
+  // 1024 bucket x 8 entry/bucket = 1<<13 hash table
+  val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = (1<<13), expBucketSize = 8, hashTableOffset = 0)
 
   val pwConf = PageWriterConfig()
 }
@@ -66,7 +66,7 @@ case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
   val initDone = out Bool()
 
   /** hashTab memory interface */
-  val axiMem   = master(Axi4(Axi4ConfigAlveo.u55cHBM))
+  val axiMem   = Vec(master(Axi4(Axi4ConfigAlveo.u55cHBM)), conf.htConf.sizeFSMArray)
   
   // SSD Intf for TB
   val SSDDataIn  = master Stream (Fragment(Bits(conf.wordSizeBit bits)))
@@ -77,7 +77,7 @@ case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
   val factorThrou = in UInt(5 bits)
 }
 
-class WrapDedupCore() extends Component {
+case class WrapDedupCore() extends Component {
 
   val dedupConf = DedupConfig()
   val io = WrapDedupCoreIO(dedupConf)
@@ -104,7 +104,10 @@ class WrapDedupCore() extends Component {
 
   // hash table: res and axi
   hashTableSS.io.res    >> pgWriterSS.io.lookupRes
-  hashTableSS.io.axiMem >> io.axiMem
+  // io.axiMem             := hashTableSS.io.axiMem
+  for (idx <- 0 until dedupConf.htConf.sizeFSMArray){
+    hashTableSS.io.axiMem(idx) >> io.axiMem(idx)
+  }
 
   //page writer: res to host and to SSD(only in tb)
   pgWriterSS.io.SSDDataIn   >> io.SSDDataIn 

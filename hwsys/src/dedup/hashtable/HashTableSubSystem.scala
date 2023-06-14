@@ -7,7 +7,7 @@ import spinal.lib.bus.amba4.axi._
 
 case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTableSize: Int = (1<<20), expBucketSize: Int = 32, hashTableOffset: BigInt = 0) {
   // Instr Decoder
-  val readyQueueLogDepth = 4
+  val readyQueueLogDepth = 3
   val waitingQueueLogDepth = 3
   val instrTagWidth = if (readyQueueLogDepth > waitingQueueLogDepth) (readyQueueLogDepth + 1) else (waitingQueueLogDepth + 1)
 
@@ -32,7 +32,7 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
   val cmdQDepth = 4
   
   // lookup engine settings
-  val sizeFSMArray = 8
+  val sizeFSMArray = 4
 }
 
 case class HashTableSSIO(conf: DedupConfig) extends Bundle {
@@ -43,7 +43,7 @@ case class HashTableSSIO(conf: DedupConfig) extends Bundle {
   val res          = master Stream (HashTableLookupFSMRes(conf.htConf))
   /** DRAM interface */
   val axiConf     = Axi4ConfigAlveo.u55cHBM
-  val axiMem      = master(Axi4(axiConf))
+  val axiMem      = Vec(master(Axi4(axiConf)), conf.htConf.sizeFSMArray)
 }
 
 class HashTableSubSystem(conf : DedupConfig) extends Component {
@@ -105,7 +105,10 @@ class HashTableSubSystem(conf : DedupConfig) extends Component {
 
   lookupEngine.io.initEn             := io.initEn
   lookupEngine.io.res                >> io.res
-  lookupEngine.io.axiMem             >> io.axiMem
+  // io.axiMem                          := lookupEngine.io.axiMem
+  for (idx <- 0 until htConf.sizeFSMArray){
+    lookupEngine.io.axiMem(idx) >> io.axiMem(idx)
+  }
 
   lookupEngine.io.mallocIdx          << memAllocator.io.mallocIdx
   lookupEngine.io.freeIdx            >> memAllocator.io.freeIdx

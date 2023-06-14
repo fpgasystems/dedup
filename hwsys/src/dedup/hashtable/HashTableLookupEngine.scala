@@ -19,7 +19,7 @@ case class HashTableLookupEngineIO(htConf: HashTableConfig) extends Bundle {
   val freeIdx     = master Stream(UInt(htConf.ptrWidth bits))
   /** DRAM interface */
   val axiConf     = Axi4ConfigAlveo.u55cHBM
-  val axiMem      = master(Axi4(axiConf))
+  val axiMem      = Vec(master(Axi4(axiConf)), htConf.sizeFSMArray)
 }
 
 case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
@@ -52,7 +52,7 @@ case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
 
   // connect mallocIdx to fsmArray using roundRobin, but arbitrate on ready signal
   // impl by modifying StreamArbiterFactory.roundRobin.transactionLock
-  io.mallocIdx >> ReverseStreamArbiterFactory().roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.mallocIdx))
+  io.mallocIdx.throwWhen(io.mallocIdx.payload === 0) >> ReverseStreamArbiterFactory().roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.mallocIdx))
 
   // initialization logic
   memInitializer.io.initEn := io.initEn
@@ -61,10 +61,18 @@ case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
 
   // arbitrate AXI connection
   when(!isMemInitDone){
-    memInitializer.io.axiMem >> io.axiMem
-    lockManager.io.axiMem.setBlocked()
+    for (idx <- 0 until htConf.sizeFSMArray){
+      lockManager.io.axiMem(idx).setBlocked()
+      if (idx == 0){
+        memInitializer.io.axiMem >> io.axiMem(idx)
+      } else {
+        io.axiMem(idx).setIdle()
+      }
+    }
   }.otherwise{
     memInitializer.io.axiMem.setBlocked()
-    lockManager.io.axiMem >> io.axiMem
+    for (idx <- 0 until htConf.sizeFSMArray){
+      lockManager.io.axiMem(idx) >> io.axiMem(idx)
+    }
   }
 }

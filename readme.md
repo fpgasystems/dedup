@@ -33,10 +33,7 @@ x86_64-pc-linux.gz | gzip -d > cs && chmod +x cs && ./cs setup
 source ${HOME}/.profile
 ```
 
-2. According to SpinalHDL documentation(https://spinalhdl.github.io/SpinalDoc-RTD/dev/Spinal
-HDL/Getting%20Started/getting_started.html#requirements-things-to-download-to-get-start
-ed), following steps are needed to install sbt via apt-get. But we can only get much older version of SBT 
-and it is ugly(since this method needs some deprecated feature)
+2. According to SpinalHDL documentation(https://spinalhdl.github.io/SpinalDoc-RTD/dev/SpinalHDL/Getting%20Started/getting_started.html#requirements-things-to-download-to-get-started), following steps are needed to install sbt via apt-get. But we can only get much older version of SBT and it is ugly(since this method needs some deprecated feature)
 ```Bash
 echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | sudo tee
 /etc/apt/sources.list.d/sbt.list
@@ -73,7 +70,7 @@ Run target waveform simulation
 ./mill hwsys.test.testSim dedup.hashtable.HashTableLookupFSMTests
 ```
 
-## FPGA Depolyment
+## FPGA Deployment
 ### Coyote setup
 
 https://github.com/rbshi/coyote/tree/dev_increimpl

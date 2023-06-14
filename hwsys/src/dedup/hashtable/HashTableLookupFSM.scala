@@ -347,8 +347,11 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
           needCurrentEntryWriteBack  := True
           needPrevEntryWriteBack     := True
 
-          // no 0 in the idx, 0 == invalid
-          when(io.mallocIdx.fire & (!(io.mallocIdx.payload === U(0)))){
+          /* no 0 in the idx, 0 == invalid
+            need fire & (!(io.mallocIdx.payload === U(0)))
+            but we move the 0-detection to outer lookupEngine module
+          */
+          when(io.mallocIdx.fire){
             mallocDone := True
             val newIdx  = io.mallocIdx.payload
             // update new entry
@@ -396,10 +399,10 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
             when(io.freeIdx.fire){
               freeDone := True
               // free current entry
-              currentEntry.SHA3Hash := 0
+              currentEntry.SHA3Hash := currentEntry.SHA3Hash
               currentEntry.RefCount := 0
-              currentEntry.SSDLBA   := 0
-              currentEntry.next     := 0
+              currentEntry.SSDLBA   := currentEntry.SSDLBA  
+              currentEntry.next     := currentEntry.next    
               currentEntryIdx       := currentEntryIdx
               // update old entry (if exist)
               prevEntry.SHA3Hash    := prevEntry.SHA3Hash

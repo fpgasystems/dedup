@@ -1,9 +1,17 @@
 package dedup
 
+import spinal.core._
+import spinal.lib._
+import spinal.lib.bus.amba4.axi._
+
+import dedup.pagewriter.PageWriterResp
+import dedup.pagewriter.SSDInstr
+
 import org.scalatest.funsuite.AnyFunSuite
 import spinal.core.sim._
 import util.sim._
 import util.sim.SimDriver._
+import util.AxiMux
 
 import scala.collection.mutable
 import scala.collection.mutable._
@@ -12,8 +20,8 @@ import scala.util.Random
 class DedupCoreNewTests extends AnyFunSuite {
   def dedupCoreNewSim(): Unit = {
 
-    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withVpdWave.withVCS.compile(new WrapDedupCore())
-    else SimConfig.withWave.compile(new WrapDedupCore())
+    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withVpdWave.withVCS.compile(new WrapDedupCoreTB())
+    else SimConfig.withWave.compile(new WrapDedupCoreTB())
 
     compiledRTL.doSim { dut =>
       DedupCoreNewSim.doSim(dut)
@@ -28,7 +36,7 @@ class DedupCoreNewTests extends AnyFunSuite {
 
 object DedupCoreNewSim {
 
-  def doSim(dut: WrapDedupCore, verbose: Boolean = false): Unit = {
+  def doSim(dut: WrapDedupCoreTB, verbose: Boolean = false): Unit = {
     dut.clockDomain.forkStimulus(period = 2)
     SimTimeout(1000000)
     dut.io.pgStrmIn.valid #= false
@@ -63,9 +71,9 @@ object DedupCoreNewSim {
     val bytePerWord = 64
 
     // random data
-    // val uniquePgData = List.fill[BigInt](uniquePageNum*pageSize/bytePerWord)(BigInt(bytePerWord*8, Random))
+    val uniquePgData = List.fill[BigInt](uniquePageNum*pageSize/bytePerWord)(BigInt(bytePerWord*8, Random))
     // fill all word with page index
-    val uniquePgData = List.tabulate[BigInt](uniquePageNum*pageSize/bytePerWord){idx => idx/(pageSize/bytePerWord)}
+    // val uniquePgData = List.tabulate[BigInt](uniquePageNum*pageSize/bytePerWord){idx => idx/(pageSize/bytePerWord)}
     
     var opStrmData: ListBuffer[BigInt] = ListBuffer()
     for (i <- 0 until opNum) {
@@ -159,4 +167,51 @@ object DedupCoreNewSim {
     pgWrRespWatch.join()
 
   }
+}
+
+case class WrapDedupCoreTB() extends Component{
+
+  val conf = DedupConfig()
+
+  val io = new Bundle {
+    /** input */
+    val opStrmIn = slave Stream (Bits(conf.instrTotalWidth bits))
+    val pgStrmIn = slave Stream (Bits(conf.wordSizeBit bits))
+    /** output */
+    val pgResp   = master Stream (PageWriterResp(conf))
+    /** control signals */
+    val initEn   = in Bool()
+    val initDone = out Bool()
+
+    /** hashTab memory interface */
+    val axiMem   = master(Axi4(Axi4ConfigAlveo.u55cHBM))
+    
+    // SSD Intf for TB
+    val SSDDataIn  = master Stream (Fragment(Bits(conf.wordSizeBit bits)))
+    val SSDDataOut = slave Stream (Fragment(Bits(conf.wordSizeBit bits)))
+    val SSDInstrIn = master Stream (SSDInstr(conf))
+
+    /** pgStore throughput control factor */
+    val factorThrou = in UInt(5 bits)
+  }
+
+  val dedupCore = WrapDedupCore()
+
+  // auto connect
+  dedupCore.io.opStrmIn    <> io.opStrmIn   
+  dedupCore.io.pgStrmIn    <> io.pgStrmIn   
+  dedupCore.io.pgResp      <> io.pgResp     
+  dedupCore.io.initEn      <> io.initEn     
+  dedupCore.io.initDone    <> io.initDone      
+  dedupCore.io.SSDDataIn   <> io.SSDDataIn  
+  dedupCore.io.SSDDataOut  <> io.SSDDataOut 
+  dedupCore.io.SSDInstrIn  <> io.SSDInstrIn 
+  dedupCore.io.factorThrou <> io.factorThrou
+
+  // axi mux, RR arbitration
+  val axiMux = AxiMux(conf.htConf.sizeFSMArray)
+  for (idx <- 0 until conf.htConf.sizeFSMArray){
+    axiMux.io.axiIn(idx) << dedupCore.io.axiMem(idx)
+  }
+  axiMux.io.axiOut >> io.axiMem
 }

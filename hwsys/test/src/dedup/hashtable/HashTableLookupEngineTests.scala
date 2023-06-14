@@ -6,6 +6,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import spinal.core.sim._
 import util.sim._
 import util.sim.SimDriver._
+import util.AxiMux
 
 import spinal.core._
 import spinal.lib._
@@ -19,8 +20,8 @@ class HashTableLookupEngineTests extends AnyFunSuite {
   test("HashTableLookupEngineTest: dummy allocator"){
     // dummy allocator with sequential dispatcher in mallocIdx
     // we can predict the allocated address in simple golden model in this setup
-    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withVpdWave.withVCS.compile(new HashTableLookupEngine(DedupConfig().htConf))
-    else SimConfig.withWave.compile(new HashTableLookupEngine(DedupConfig().htConf))
+    val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withVpdWave.withVCS.compile(new HashTableLookupEngineTB())
+    else SimConfig.withWave.compile(new HashTableLookupEngineTB())
 
     compiledRTL.doSim { dut =>
       HashTableLookupEngineSim.doSim(dut)
@@ -29,7 +30,7 @@ class HashTableLookupEngineTests extends AnyFunSuite {
 }
 
 object HashTableLookupEngineSim {
-  def doSim(dut: HashTableLookupEngine, verbose: Boolean = false): Unit = {
+  def doSim(dut: HashTableLookupEngineTB, verbose: Boolean = false): Unit = {
     // val randomWithSeed = new Random(1006045258)
     val randomWithSeed = new Random()
     dut.clockDomain.forkStimulus(period = 2)
@@ -57,7 +58,7 @@ object HashTableLookupEngineSim {
     val bucketAvgLen = 8
     val numUniqueSHA3 = numBucketUsed * bucketAvgLen
 
-    val uniqueSHA3refCount = 4
+    val uniqueSHA3refCount = 8
 
     assert(numBucketUsed <= htConf.nBucket)
     val bucketMask = ((BigInt(1) << (log2Up( htConf.nBucket) - log2Up(numBucketUsed)) - 1) << log2Up(numBucketUsed))
@@ -94,7 +95,7 @@ object HashTableLookupEngineSim {
       }
     }
 
-    val maxAllocRound = Array.tabulate(htConf.sizeFSMArray)(idx => ((pseudoAllocator(idx) - 1)/htConf.sizeFSMArray)).max
+    // val maxAllocRound = Array.tabulate(htConf.sizeFSMArray)(idx => ((pseudoAllocator(idx) - 1)/htConf.sizeFSMArray)).max
     
     // 1,...,N, 1,...,N
     // for (j <- 0 until dupFacotr) {
@@ -130,17 +131,13 @@ object HashTableLookupEngineSim {
 
     /* pseudo malloc*/
     val pseudoMallocIdxPush = fork {
-      for (newBlkIdx <- 0 until (32 + maxAllocRound) * htConf.sizeFSMArray) {
+      for (newBlkIdx <- 0 until numUniqueSHA3) {
         dut.io.mallocIdx.sendData(dut.clockDomain, BigInt(newBlkIdx+1))
       }
     }
 
     /* pseudo freeUp*/
-    // val pseudoFreeIdxWatch = fork {
-    //   for (newBlkIdx <- 0 until numUniqueSHA3) {
-    //     dut.io.mallocIdx.sendData(dut.clockDomain, BigInt(newBlkIdx+1))
-    //   }
-    // }
+    dut.io.freeIdx.ready     #= false
 
     /* Res watch*/
     val resWatch = fork {
@@ -158,8 +155,60 @@ object HashTableLookupEngineSim {
     }
 
     instrStrmPush.join()
-    // pseudoMallocIdxPush.join() // no need to wait, since we provide more than needed Idx
+    pseudoMallocIdxPush.join()
     resWatch.join()
+
+    // Test part 2: delete all
+    val goldenResponse2: ListBuffer[execRes] = ListBuffer()
+    val instrStrmData2: ListBuffer[BigInt] = ListBuffer()
+    val goldenFreeIdx2: ListBuffer[BigInt] = ListBuffer()
+
+    // var pgStrmData: ListBuffer[BigInt] = ListBuffer()
+
+    // 1,...,N, 1,...,N
+    for (i <- 0 until uniqueSHA3refCount) {
+      for (j <- 0 until numUniqueSHA3) {
+        instrStrmData2.append(HashTableLookupHelpers.eraseInstrGen(uniqueSHA3(j)))
+        val isGC = (goldenHashTableRefCountLayout(j) == 1)
+        goldenHashTableRefCountLayout.update(j, goldenHashTableRefCountLayout(j) - 1)
+        if (isGC) {
+          goldenFreeIdx2.append(goldenHashTableSSDLBALayout(j))
+        }
+        goldenResponse2.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),1))
+      }
+    }
+
+    /* Stimuli injection */
+    val instrStrmPush2 = fork {
+      for (instrIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        dut.io.instrStrmIn.sendData(dut.clockDomain, instrStrmData2(instrIdx))
+      }
+    }
+
+    dut.io.mallocIdx.valid     #= false
+
+    /* pseudo free*/
+    val pseudoFreeIdxWatch2 = fork {
+      for (newBlkIdx <- 0 until numUniqueSHA3) {
+        val freeIdx = dut.io.freeIdx.recvData(dut.clockDomain)
+        assert((freeIdx >= 1) && (freeIdx < numUniqueSHA3 + 1))
+      }
+    }
+
+
+    /* Res watch*/
+    val resWatch2 = fork {
+      for (respIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        val respData = dut.io.res.recvData(dut.clockDomain)
+        val decodedRealOutput = HashTableLookupHelpers.decodeRes(respData)
+        assert(decodedRealOutput.SHA3Hash == goldenResponse2(respIdx).SHA3Hash)
+        assert(decodedRealOutput.RefCount == goldenResponse2(respIdx).RefCount)
+      }
+    }
+
+    instrStrmPush2.join()
+    pseudoFreeIdxWatch2.join()
+    resWatch2.join()
 
     // // check same result
     // (BFResNew, BFResOld).zipped.map{ case (output, expected) =>
@@ -168,11 +217,11 @@ object HashTableLookupEngineSim {
   }
 }
 
-case class HashTableSimpleLookupEngineTB() extends Component{
+case class HashTableLookupEngineTB() extends Component{
 
   val conf = DedupConfig()
 
-  val htConf = HashTableLookupHelpers.htConf
+  val htConf = conf.htConf
 
   val io = new Bundle {
     val initEn      = in Bool()
@@ -188,47 +237,17 @@ case class HashTableSimpleLookupEngineTB() extends Component{
     val axiMem      = master(Axi4(axiConf))
   }
 
-  /** default status of streams */
-  io.axiMem.setIdle()
+  val lookupEngine = HashTableLookupEngine(htConf)
+  lookupEngine.io.initEn      := io.initEn
+  io.initDone                 := lookupEngine.io.initDone
+  lookupEngine.io.instrStrmIn << io.instrStrmIn
+  io.res                      << lookupEngine.io.res
+  lookupEngine.io.mallocIdx   << io.mallocIdx
+  io.freeIdx                  << lookupEngine.io.freeIdx
 
-  val memInitializer = HashTableMemInitializer(htConf)
-
-  val dispatchedInstrStream = StreamDispatcherSequential(io.instrStrmIn, htConf.sizeFSMArray)
-  val dispatchedMallocIdxStream = StreamDispatcherSequential(io.mallocIdx, htConf.sizeFSMArray)
-
-  val fsmResBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMRes(htConf), 32))
-  val fsmFreeIdxBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(UInt(htConf.ptrWidth bits), 32))
-
-  val lockManager = HashTableLookupLockManager(htConf)
-
-  val fsmArray = Array.tabulate(htConf.sizeFSMArray){idx => 
-    val fsmInstance = HashTableLookupFSM(htConf,idx)
-    // connect instr dispatcher to fsm
-    dispatchedInstrStream(idx).queue(4) >> fsmInstance.io.instrStrmIn
-    dispatchedMallocIdxStream(idx).queue(32) >> fsmInstance.io.mallocIdx
-    // connect fsm results to output
-    fsmInstance.io.initEn := io.initEn
-    fsmInstance.io.res >> fsmResBufferArray(idx).io.push
-    fsmInstance.io.freeIdx >> fsmFreeIdxBufferArray(idx).io.push
-    fsmInstance.io.lockReq >> lockManager.io.fsmArrayLockReq(idx)
-    fsmInstance.io.axiMem >> lockManager.io.fsmArrayDRAMReq(idx)
-    fsmInstance
-  }     
-
-  io.res << StreamArbiterFactory.sequentialOrder.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmResBufferArray(idx).io.pop))
-  io.freeIdx << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmFreeIdxBufferArray(idx).io.pop))
-
-  // initialization logic
-  memInitializer.io.initEn := io.initEn
-  val isMemInitDone = memInitializer.io.initDone
-  io.initDone := isMemInitDone
-
-  // arbitrate AXI connection
-  when(!isMemInitDone){
-    memInitializer.io.axiMem >> io.axiMem
-    lockManager.io.axiMem.setBlocked()
-  }.otherwise{
-    memInitializer.io.axiMem.setBlocked()
-    lockManager.io.axiMem >> io.axiMem
+  val axiMux = AxiMux(htConf.sizeFSMArray)
+  for (idx <- 0 until htConf.sizeFSMArray){
+    axiMux.io.axiIn(idx) << lookupEngine.io.axiMem(idx)
   }
+  axiMux.io.axiOut >> io.axiMem
 }

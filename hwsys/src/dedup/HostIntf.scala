@@ -27,7 +27,7 @@ class HostIntfIO(axiConf: Axi4Config) extends Bundle {
   val pgStrm = master Stream(Bits(512 bits))
 
   // resp stream
-  val pgResp = slave Stream(Bits(128 bits))
+  val pgResp = slave Stream(Bits(512 bits))
 
 
   def regMap(r: AxiLite4SlaveFactory, baseR: Int): Int = {
@@ -101,7 +101,8 @@ class HostIntf() extends Component {
   /** write path */
 
   val pgRespQWide = StreamFifo(Bits(512 bits), 512)
-  pgRespQWide.io.push.translateFrom(io.pgResp.slowdown(4)) (_ := _.asBits)
+  pgRespQWide.io.push << io.pgResp
+  // pgRespQWide.io.push.translateFrom(io.pgResp.slowdown(4)) (_ := _.asBits)
 
   val wrReqBatchSize = 256 // batch resp of 16 pages, each page resp is 128b (16B)
   bpss_wr_req.vaddr := wrAddr.resized

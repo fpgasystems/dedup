@@ -12,8 +12,8 @@ import util.{CntDynmicBound, FrgmDemux}
 
 case class PageWriterConfig(dataWidth: Int = 512) {
   // Instr Decoder
-  val readyQueueLogDepth = 4
-  val waitingQueueLogDepth = 4
+  val readyQueueLogDepth = 3
+  val waitingQueueLogDepth = 3
   val instrTagWidth = if (readyQueueLogDepth > waitingQueueLogDepth) (readyQueueLogDepth + 1) else (waitingQueueLogDepth + 1)
 
   // val pgIdxWidth = 32
@@ -100,7 +100,7 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
   val pwConf = conf.pwConf
 
   /** queue here to avoid blocking the wrap pgIn, which is also forked to BF & SHA3 */
-  val frgmInQ    = io.pgStrmFrgmIn.queue(512) // 128 x 64 fragment = 8096
+  val frgmInQ    = io.pgStrmFrgmIn.queue(4096) // 128 x 64 fragment = 8192
   val lookupResQ = io.lookupRes.queue(8)
 
   val instrDecoder = PageWriterInstrDecoder(conf)
