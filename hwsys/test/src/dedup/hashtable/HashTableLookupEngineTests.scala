@@ -90,7 +90,7 @@ object HashTableLookupEngineSim {
           goldenHashTableSSDLBALayout.update(j, pseudoAllocator(fsmId))
           pseudoAllocator.update(fsmId, pseudoAllocator(fsmId) + htConf.sizeFSMArray)
         }
-        goldenResponse.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),0))
+        goldenResponse.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),1))
         instrIdx = instrIdx + 1
       }
     }
@@ -151,6 +151,7 @@ object HashTableLookupEngineSim {
         // assert(decodedRealOutput == goldenResponse(respIdx))
         assert(decodedRealOutput.SHA3Hash == goldenResponse(respIdx).SHA3Hash)
         assert(decodedRealOutput.RefCount == goldenResponse(respIdx).RefCount)
+        assert(decodedRealOutput.opCode   == goldenResponse(respIdx).opCode)
       }
     }
 
@@ -174,7 +175,7 @@ object HashTableLookupEngineSim {
         if (isGC) {
           goldenFreeIdx2.append(goldenHashTableSSDLBALayout(j))
         }
-        goldenResponse2.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),1))
+        goldenResponse2.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),2))
       }
     }
 
@@ -203,6 +204,7 @@ object HashTableLookupEngineSim {
         val decodedRealOutput = HashTableLookupHelpers.decodeRes(respData)
         assert(decodedRealOutput.SHA3Hash == goldenResponse2(respIdx).SHA3Hash)
         assert(decodedRealOutput.RefCount == goldenResponse2(respIdx).RefCount)
+        assert(decodedRealOutput.opCode   == goldenResponse2(respIdx).opCode)
       }
     }
 

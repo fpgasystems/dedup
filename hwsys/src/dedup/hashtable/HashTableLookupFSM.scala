@@ -5,6 +5,7 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
 import spinal.lib.bus.amba4.axi._
+import util.StreamFork4
 
 // object HashTableOp extends SpinalEnum {
 //   val INSERT, LOOKUP, ERASE = newElement()
@@ -114,22 +115,27 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
   io.lockReq.setIdle()
   io.mallocIdx.setBlocked()
   io.freeIdx.setIdle()
-  io.axiMem.setIdle()
+  io.axiMem.writeCmd.setIdle()
+  io.axiMem.writeData.setIdle()
+  io.axiMem.writeRsp.setBlocked()
+  io.axiMem.readCmd.setIdle()
 
   val instr      = Reg(HashTableLookupFSMInstr(htConf))
   val idxBucket  = instr.SHA3Hash(htConf.idxBucketWidth-1 downto 0).asUInt // lsb as the bucket index
-  // val bucketMetaDataAddr = Reg(UInt(64 bits)) init (0)
 
-  // val dramRdCmdQ = StreamFifo(DRAMRdCmd(htConf), htConf.cmdQDepth)
-  // val dramWrCmdQ = StreamFifo(DRAMWrCmd(htConf), htConf.cmdQDepth)
+  /* two additional pipeline stages for readRsp, otherwise timing not meet in PnR */
+  val readRspStage1 = io.axiMem.readRsp // already pipelined in dedupSys
+  val readRspStage2 = readRspStage1.pipelined(StreamPipe.FULL)
+  readRspStage2.setBlocked()
 
-  /** default */
-  // dramRdCmdQ.io.push.setIdle()
-  // dramRdCmdQ.io.pop.setBlocked()
-
-  // dramWrCmdQ.io.push.setIdle()
-  // dramWrCmdQ.io.pop.setBlocked()
-
+  val hashComparator = new Area{
+    val decodedHashTableEntry = HashTableEntryNoPadding(htConf)
+    decodedHashTableEntry.assignFromBits(readRspStage1.data, decodedHashTableEntry.getBitsWidth - 1, 0)
+    val readHashSliced   = decodedHashTableEntry.SHA3Hash.subdivideIn(8 slices)
+    val instrHashSliced  = instr.SHA3Hash.subdivideIn(8 slices)
+    val equalCheckStage1 = RegNext((readHashSliced, instrHashSliced).zipped.map(_ === _).asBits())
+    val isHashValMatch   = equalCheckStage1.andR
+  }
 
   val fsm = new StateMachine {
     val FETCH_INSTRUCTION                                                         = new State with EntryPoint
@@ -147,7 +153,12 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
       io.lockReq.setIdle()
       io.mallocIdx.setBlocked()
       io.freeIdx.setIdle()
-      io.axiMem.setIdle()
+      
+      io.axiMem.writeCmd.setIdle()
+      io.axiMem.writeData.setIdle()
+      io.axiMem.writeRsp.setBlocked()
+      io.axiMem.readCmd.setIdle()
+      readRspStage2.setBlocked()
       // instruction fetching
       when(io.instrStrmIn.fire){
         instr := io.instrStrmIn.payload
@@ -160,7 +171,11 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
       io.res.setIdle()
       io.mallocIdx.setBlocked()
       io.freeIdx.setIdle()
-      io.axiMem.setIdle()
+      io.axiMem.writeCmd.setIdle()
+      io.axiMem.writeData.setIdle()
+      io.axiMem.writeRsp.setBlocked()
+      io.axiMem.readCmd.setIdle()
+      readRspStage2.setBlocked()
 
       io.lockReq.valid             := True
       io.lockReq.payload.idxBucket := idxBucket
@@ -192,7 +207,11 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
       io.lockReq.setIdle()
       io.mallocIdx.setBlocked()
       io.freeIdx.setIdle()
-      io.axiMem.setIdle()
+      io.axiMem.writeCmd.setIdle()
+      io.axiMem.writeData.setIdle()
+      io.axiMem.writeRsp.setBlocked()
+      io.axiMem.readCmd.setIdle()
+      readRspStage2.setBlocked()
       
       when(!fetchMetaDataAXIIssued){
         val metaDataStartAddr    = htConf.hashTableOffset + (idxBucket << htConf.bucketMetaDataAddrBitShift)
@@ -209,11 +228,11 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
         }
       }.elsewhen(!fetchMetaDataAXIReceived){
         // command issued, wait for response
-        io.axiMem.readRsp.ready  := True
-        when(io.axiMem.readRsp.fire){
+        readRspStage2.ready  := True
+        when(readRspStage2.fire){
           fetchMetaDataAXIReceived := True
           val decodedMetaData = HashTableBucketMetaDataNoPadding(htConf)
-          decodedMetaData.assignFromBits(io.axiMem.readRsp.data, bucketMetaData.getBitsWidth - 1, 0)
+          decodedMetaData.assignFromBits(readRspStage2.data, bucketMetaData.getBitsWidth - 1, 0)
           bucketMetaData := decodedMetaData
           nextEntryIdx   := decodedMetaData.head
           goto(FETCH_ENTRY)
@@ -222,7 +241,7 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
     }
 
     val cntFetchEntryAXIIssued   = Counter(htConf.ptrWidth bits, io.axiMem.readCmd.fire)
-    val cntFetchEntryAXIReceived = Counter(htConf.ptrWidth bits, io.axiMem.readRsp.fire)
+    val cntFetchEntryAXIReceived = Counter(htConf.ptrWidth bits, readRspStage2.fire)
 
     val lookupIsExist     = Reg(Bool()) // lookup result
     // current fetched entry
@@ -230,9 +249,9 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
     val currentEntryIdx   = Reg(UInt(htConf.ptrWidth bits))
     val currentEntryValid = Reg(Bool())
     // buffered prev entry
-    val prevEntry         = RegNextWhen(currentEntry, io.axiMem.readRsp.fire)
-    val prevEntryIdx      = RegNextWhen(currentEntryIdx, io.axiMem.readRsp.fire)
-    val prevEntryValid    = RegNextWhen(currentEntryValid, io.axiMem.readRsp.fire)
+    val prevEntry         = RegNextWhen(currentEntry, readRspStage2.fire)
+    val prevEntryIdx      = RegNextWhen(currentEntryIdx, readRspStage2.fire)
+    val prevEntryValid    = RegNextWhen(currentEntryValid, readRspStage2.fire)
 
     FETCH_ENTRY.onEntry{
       cntFetchEntryAXIIssued.clear()
@@ -261,7 +280,11 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
       io.lockReq.setIdle()
       io.mallocIdx.setBlocked()
       io.freeIdx.setIdle()
-      io.axiMem.setIdle()
+      io.axiMem.writeCmd.setIdle()
+      io.axiMem.writeData.setIdle()
+      io.axiMem.writeRsp.setBlocked()
+      io.axiMem.readCmd.setIdle()
+      readRspStage2.setBlocked()
 
       // fetch entry
       when((bucketMetaData.head === 0 ) | (bucketMetaData.tail === 0 ) | (bucketMetaData.len === 0 )){
@@ -281,16 +304,16 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
         io.axiMem.readCmd.setBurstINCR()
         io.axiMem.readCmd.valid := (cntFetchEntryAXIIssued === cntFetchEntryAXIReceived) & (!lookupIsExist)
 
-        io.axiMem.readRsp.ready := True
-        when(io.axiMem.readRsp.fire){
+        readRspStage2.ready := True
+        when(readRspStage2.fire){
           val decodedHashTableEntry = HashTableEntryNoPadding(htConf)
-          decodedHashTableEntry.assignFromBits(io.axiMem.readRsp.data, decodedHashTableEntry.getBitsWidth - 1, 0)
+          decodedHashTableEntry.assignFromBits(readRspStage2.data, decodedHashTableEntry.getBitsWidth - 1, 0)
           currentEntry      := decodedHashTableEntry
           currentEntryIdx   := nextEntryIdx
           currentEntryValid := True
           nextEntryIdx      := decodedHashTableEntry.next
 
-          when(decodedHashTableEntry.SHA3Hash === instr.SHA3Hash){
+          when(hashComparator.isHashValMatch){
             // find
             lookupIsExist := True
             goto(EXEC)
@@ -327,7 +350,11 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
       io.lockReq.setIdle()
       io.mallocIdx.setBlocked()
       io.freeIdx.setIdle()
-      io.axiMem.setIdle()
+      io.axiMem.writeCmd.setIdle()
+      io.axiMem.writeData.setIdle()
+      io.axiMem.writeRsp.setBlocked()
+      io.axiMem.readCmd.setIdle()
+      readRspStage2.setBlocked()
 
       when(instr.opCode === DedupCoreOp.WRITE2FREE){
         // insert
@@ -464,7 +491,7 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
       io.axiMem.writeCmd.setIdle()
       io.axiMem.writeData.setIdle()
       io.axiMem.readCmd.setIdle()
-      io.axiMem.readRsp.setBlocked()
+      readRspStage2.setBlocked()
 
       io.axiMem.writeRsp.ready := True
       val responseNeeded = Vec(needMetaDataWriteBack, needCurrentEntryWriteBack & currentEntryValid, needPrevEntryWriteBack & prevEntryValid).sCount(True)
@@ -555,7 +582,11 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
       io.instrStrmIn.setBlocked()
       io.mallocIdx.setBlocked()
       io.freeIdx.setIdle()
-      io.axiMem.setIdle()
+      io.axiMem.writeCmd.setIdle()
+      io.axiMem.writeData.setIdle()
+      io.axiMem.writeRsp.setBlocked()
+      io.axiMem.readCmd.setIdle()
+      readRspStage2.setBlocked()
 
       io.lockReq.valid             := !lockReleased
       io.lockReq.payload.idxBucket := idxBucket

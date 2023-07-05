@@ -10,6 +10,7 @@ import util.ReverseStreamArbiterFactory
   make sure seq instr in, seq res out in same order*/
 case class HashTableLookupEngineIO(htConf: HashTableConfig) extends Bundle {
   val initEn      = in Bool()
+  val clearInitStatus = in Bool()
   val initDone    = out Bool()
   // execution results
   val instrStrmIn = slave Stream(HashTableLookupFSMInstr(htConf))
@@ -30,6 +31,8 @@ case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
 
   val dispatchedInstrStream = StreamDispatcherSequential(io.instrStrmIn, htConf.sizeFSMArray)
 
+  val fsmInstrBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMInstr(htConf), 4))
+
   val fsmResBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMRes(htConf), 4))
 
   val lockManager = HashTableLookupLockManager(htConf)
@@ -37,25 +40,30 @@ case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
   val fsmArray = Array.tabulate(htConf.sizeFSMArray){idx => 
     val fsmInstance = HashTableLookupFSM(htConf,idx)
     // connect instr dispatcher to fsm
-    dispatchedInstrStream(idx).queue(4) >> fsmInstance.io.instrStrmIn
+    dispatchedInstrStream(idx) >> fsmInstrBufferArray(idx).io.push
+    fsmInstrBufferArray(idx).io.pop >> fsmInstance.io.instrStrmIn
+    
+    fsmInstrBufferArray(idx).io.flush := io.initEn
+    fsmInstance.io.initEn             := io.initEn
+    fsmResBufferArray(idx).io.flush   := io.initEn
     // connect fsm results to output
-    fsmInstance.io.initEn := io.initEn
     fsmInstance.io.res >> fsmResBufferArray(idx).io.push
-    fsmInstance.io.lockReq >> lockManager.io.fsmArrayLockReq(idx)
-    fsmInstance.io.axiMem >> lockManager.io.fsmArrayDRAMReq(idx)
+    fsmInstance.io.lockReq.pipelined(StreamPipe.FULL) >> lockManager.io.fsmArrayLockReq(idx)
+    fsmInstance.io.axiMem.pipelined(StreamPipe.FULL,StreamPipe.FULL,StreamPipe.FULL,StreamPipe.FULL,StreamPipe.FULL) >> lockManager.io.fsmArrayDRAMReq(idx)
     fsmInstance
   }
 
-  io.res << StreamArbiterFactory.sequentialOrder.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmResBufferArray(idx).io.pop))
+  io.res << StreamArbiterFactory.sequentialOrder.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmResBufferArray(idx).io.pop)).pipelined(StreamPipe.FULL)
 
-  io.freeIdx << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.freeIdx))
+  io.freeIdx << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.freeIdx)).pipelined(StreamPipe.FULL)
 
   // connect mallocIdx to fsmArray using roundRobin, but arbitrate on ready signal
   // impl by modifying StreamArbiterFactory.roundRobin.transactionLock
-  io.mallocIdx.throwWhen(io.mallocIdx.payload === 0) >> ReverseStreamArbiterFactory().roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.mallocIdx))
+  io.mallocIdx.throwWhen(io.mallocIdx.payload === 0).pipelined(StreamPipe.FULL) >> ReverseStreamArbiterFactory().roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.mallocIdx))
 
   // initialization logic
   memInitializer.io.initEn := io.initEn
+  memInitializer.io.clearInitStatus := io.clearInitStatus
   val isMemInitDone = memInitializer.io.initDone
   io.initDone := isMemInitDone
 

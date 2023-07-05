@@ -194,7 +194,7 @@ object SimDriver {
         assert(hostSendQ.nonEmpty, "hostSendQ is empty!")
         val reqByte = bigIntTruncVal(rdReqD, 47, 20).toInt
         for (i <- 0 until reqByte/(dWidth/8)) {
-          val tkeep = (BigInt(1) << dWidth/8) - 1
+          val tkeep = ((BigInt(1) << dWidth/8) - 1) << dWidth
           val tlast = if (i == reqByte/(dWidth/8)-1) BigInt(1) << (dWidth+dWidth/8) else 0.toBigInt
           hostIO.axis_host_sink.sendData(cd, hostSendQ.dequeue() + tkeep + tlast)
         }

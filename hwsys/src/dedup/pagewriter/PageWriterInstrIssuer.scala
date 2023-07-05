@@ -36,7 +36,7 @@ case class PageWriterInstrIssuer(conf: DedupConfig) extends Component{
     val fire  = Bool() default (False)
 
     // slicing: slice instruction with pagecount = 10 to 10x instr on one page 
-    val slicingCounter = Counter(conf.LBAWidth)
+    val slicingCounter = Counter(conf.LBAWidth bits)
 
     // payload assignment
     payload.SHA3Hash     := io.lookupResStream.payload.SHA3Hash

@@ -34,7 +34,7 @@ class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component {
   /** stream frgm adapter 512 -> 32 */
   val slowBufferAdptStrm = Vec(Stream(Fragment(Bits(32 bits))), sizeFastBufferGrp)
   (fastBufferGrp, slowBufferAdptStrm).zipped.foreach { (a, b) =>
-    StreamFragmentWidthAdapter(a.io.pop, b)
+    StreamFragmentWidthAdapter(a.io.pop.pipelined(StreamPipe.FULL), b)
   }
 
   /** Slow buffer WxDxN: 32bx1024x64(sizeSlowBufferGrp) */
@@ -63,7 +63,7 @@ class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component {
 
   /** Arbiter the results */
   val cntSel = Counter(sizeSlowBufferGrp, io.res.fire)
-  io.res.translateFrom(StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp)))(_ := _.digest)
+  io.res.translateFrom(StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp.pipelined(StreamPipe.FULL))))(_ := _.digest)
 
   /** pipeline interface (initEn, cmd, res) of some SHA3Core to enable SLR allocation in implementation
    * Normall one SLR in u55c device can have 48 SHA3 cores

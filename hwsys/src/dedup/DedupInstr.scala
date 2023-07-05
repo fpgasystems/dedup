@@ -4,7 +4,7 @@ import spinal.core._
 import spinal.lib._
 
 object DedupCoreOp extends SpinalEnum(binarySequential) {
-  val WRITE2FREE, ERASEREF, READSSD = newElement()
+  val NOP, WRITE2FREE, ERASEREF, READSSD = newElement()
 }
 
 /* instr format: total 512 bit wide

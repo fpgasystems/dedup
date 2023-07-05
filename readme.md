@@ -25,8 +25,7 @@ From https://www.scala-lang.org/download/
 
 ```Bash
 # for x86-64 architecture
-curl -fL https://github.com/coursier/coursier/releases/latest/download/cs-
-x86_64-pc-linux.gz | gzip -d > cs && chmod +x cs && ./cs setup
+curl -fL https://github.com/coursier/coursier/releases/latest/download/cs-x86_64-pc-linux.gz | gzip -d > cs && chmod +x cs && ./cs setup
 # for arm64
 # curl -fL https://github.com/VirtusLab/coursier-m1/releases/latest/download/cs-aarch64-pc-linux.gz | gzip -d > cs && chmod +x cs && ./cs setup
 # add ${HOME}/.local/share/coursier/bin/ to PATH
@@ -73,17 +72,17 @@ Run target waveform simulation
 ## FPGA Deployment
 ### Coyote setup
 
-https://github.com/rbshi/coyote/tree/dev_increimpl
+https://github.com/rbshi/coyote/tree/dev_dlm
 
 ```Bash
 # build coyote
-git clone https://github.com/rbshi/coyote.git --branch=dev_increimpl
+git clone https://github.com/rbshi/coyote.git --branch=dev_dlm
 
 cd coyote/hw
 mkdir build && cd build
 
 # use desired number memory channel: -DN_MEM_CHAN
-cmake .. -DFDEV_NAME=u55c -DVITIS_HLS=1 -DEN_BPSS=1 -DHBM_BPSS=1 -DEN_RDMA_0=0 -DEN_UCLK=1 -DUCLK_F=200 -DAXI_ID_BITS=6 -DN_MEM_CHAN=8 -DEN_MEM_BPSS=1 -DEN_RPC=0 -DEN_REGULAR_NAME=1 -DEN_INCR_IMPL=1
+cmake .. -DFDEV_NAME=u55c -DVITIS_HLS=1 -DEN_BPSS=1 -DHBM_BPSS=1 -DEN_UCLK=1 -DUCLK_F=250 -DAXI_ID_BITS=6 -DAPPS=dedup -DAPPS_CONFIG=4k -DN_MEM_CHAN=4 -DEN_MEM_BPSS=1
 
 # use screen session on build server
 screen
@@ -92,6 +91,6 @@ make compile
 # coyote done
 
 # put coyote and dedup system together
-cd dedup/vivado_proj
-./build_user.sh
+# cd dedup/vivado_proj
+# ./build_user.sh
 ```

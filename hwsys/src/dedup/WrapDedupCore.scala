@@ -21,10 +21,6 @@ import dedup.pagewriter.PageWriterResp
 import dedup.pagewriter.SSDInstr
 import dedup.pagewriter.PageWriterSubSystem
 
-object DedupCoreStatus extends SpinalEnum(binarySequential) {
-  val IDLE, OP_READY, WAIT_FOR_DATA, BUSY = newElement()
-}
-
 case class DedupConfig() {
   /* general config */
   val pgSize = 4 * 1024 // 4kiB
@@ -63,6 +59,7 @@ case class WrapDedupCoreIO(conf: DedupConfig) extends Bundle {
   val pgResp   = master Stream (PageWriterResp(conf))
   /** control signals */
   val initEn   = in Bool()
+  val clearInitStatus = in Bool()
   val initDone = out Bool()
 
   /** hashTab memory interface */
@@ -118,6 +115,7 @@ case class WrapDedupCore() extends Component {
 
   /** init signals */
   hashTableSS.io.initEn := io.initEn
+  hashTableSS.io.clearInitStatus := io.clearInitStatus
   pgWriterSS.io.initEn  := io.initEn
   io.initDone           := hashTableSS.io.initDone
 

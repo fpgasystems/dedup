@@ -93,7 +93,7 @@ object HashTableFSMTBSim {
           goldenHashTableSSDLBALayout.update(j, pseudoAllocator)
           pseudoAllocator = pseudoAllocator + 1
         }
-        goldenResponse.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),0))
+        goldenResponse.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),1))
       }
     }
     
@@ -167,7 +167,7 @@ object HashTableFSMTBSim {
         if (isGC) {
           goldenFreeIdx2.append(goldenHashTableSSDLBALayout(j))
         }
-        goldenResponse2.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),1))
+        goldenResponse2.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),2))
       }
     }
 
@@ -216,7 +216,7 @@ object HashTableLookupHelpers{
 
   def insertInstrGen(SHA3 : BigInt) : BigInt = {
     val sha3_trunc = SimHelpers.bigIntTruncVal(SHA3, 255, 0)
-    val opCode = BigInt(0)
+    val opCode = BigInt(1)
 
     var lookupInstr = BigInt(0)
     lookupInstr = lookupInstr + (opCode << (HashTableLookupFSMInstr(htConf).getBitsWidth - DedupCoreOp().getBitsWidth))
@@ -226,7 +226,7 @@ object HashTableLookupHelpers{
 
   def eraseInstrGen(SHA3 : BigInt) : BigInt = {
     val sha3_trunc = SimHelpers.bigIntTruncVal(SHA3, 255, 0)
-    val opCode = BigInt(1)
+    val opCode = BigInt(2)
 
     var lookupInstr = BigInt(0)
     lookupInstr = lookupInstr + (opCode << (HashTableLookupFSMInstr(htConf).getBitsWidth - DedupCoreOp().getBitsWidth))

@@ -7,8 +7,8 @@ import spinal.lib.bus.amba4.axi._
 
 case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTableSize: Int = (1<<20), expBucketSize: Int = 32, hashTableOffset: BigInt = 0) {
   // Instr Decoder
-  val readyQueueLogDepth = 3
-  val waitingQueueLogDepth = 3
+  val readyQueueLogDepth = 10
+  val waitingQueueLogDepth = 10
   val instrTagWidth = if (readyQueueLogDepth > waitingQueueLogDepth) (readyQueueLogDepth + 1) else (waitingQueueLogDepth + 1)
 
   assert(hashTableSize%expBucketSize==0, "Hash table size (#entry) should be a multiple of bucketSize")
@@ -37,6 +37,7 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
 
 case class HashTableSSIO(conf: DedupConfig) extends Bundle {
   val initEn       = in Bool () 
+  val clearInitStatus = in Bool()
   val initDone     = out Bool ()
   val opStrmIn     = slave Stream (Bits(conf.instrTotalWidth bits))
   val pgStrmFrgmIn = slave Stream (Fragment(Bits(conf.wordSizeBit bits)))
@@ -82,28 +83,29 @@ class HashTableSubSystem(conf : DedupConfig) extends Component {
 
   // SHA3 Group + SHA3 res Queue
   sha3Grp.io.initEn := io.initEn
-  sha3Grp.io.frgmIn << io.pgStrmFrgmIn
+  sha3Grp.io.frgmIn << io.pgStrmFrgmIn.pipelined(StreamPipe.FULL)
 
-  SHA3ResQueue.io.push  << sha3Grp.io.res
+  SHA3ResQueue.io.push  << sha3Grp.io.res.pipelined(StreamPipe.FULL)
   SHA3ResQueue.io.flush := io.initEn
 
   // decoder + decoded instr Queue
-  io.opStrmIn                        >> instrDecoder.io.rawInstrStream
-  instrDecoder.io.readyInstrStream   >> decodedReadyInstrQueue.io.push
-  instrDecoder.io.waitingInstrStream >> decodedWaitingInstrQueue.io.push
+  io.opStrmIn.pipelined(StreamPipe.FULL) >> instrDecoder.io.rawInstrStream
+  instrDecoder.io.readyInstrStream       >> decodedReadyInstrQueue.io.push
+  instrDecoder.io.waitingInstrStream     >> decodedWaitingInstrQueue.io.push
 
   decodedReadyInstrQueue.io.flush    := io.initEn
   decodedWaitingInstrQueue.io.flush  := io.initEn
 
   // instr issuer and lookup Engine
   instrIssuer.io.initEn              := io.initEn
-  instrIssuer.io.readyInstrStream    << decodedReadyInstrQueue.io.pop
-  instrIssuer.io.waitingInstrStream  << decodedWaitingInstrQueue.io.pop
-  instrIssuer.io.SHA3ResStream       << SHA3ResQueue.io.pop
+  instrIssuer.io.readyInstrStream    << decodedReadyInstrQueue.io.pop.pipelined(StreamPipe.FULL)
+  instrIssuer.io.waitingInstrStream  << decodedWaitingInstrQueue.io.pop.pipelined(StreamPipe.FULL)
+  instrIssuer.io.SHA3ResStream       << SHA3ResQueue.io.pop.pipelined(StreamPipe.FULL)
 
-  instrIssuer.io.instrIssueStream    >> lookupEngine.io.instrStrmIn
+  instrIssuer.io.instrIssueStream.pipelined(StreamPipe.FULL) >> lookupEngine.io.instrStrmIn
 
   lookupEngine.io.initEn             := io.initEn
+  lookupEngine.io.clearInitStatus    := io.clearInitStatus
   lookupEngine.io.res                >> io.res
   // io.axiMem                          := lookupEngine.io.axiMem
   for (idx <- 0 until htConf.sizeFSMArray){

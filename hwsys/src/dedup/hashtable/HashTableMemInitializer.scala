@@ -10,6 +10,7 @@ import spinal.lib.bus.amba4.axi._
 
 case class HashTableMemInitializerIO(htConf: HashTableConfig) extends Bundle {
   val initEn      = in Bool()
+  val clearInitStatus = in Bool()
   val initDone    = out Bool()
   /** DRAM interface */
   val axiConf     = Axi4ConfigAlveo.u55cHBM
@@ -60,6 +61,9 @@ case class HashTableMemInitializer (htConf: HashTableConfig) extends Component {
         cntMemInitAXIResp.clear()
         memInitAXIAddrAllIssued := False
         memInitAXIDataAllIssued := False
+        when(io.clearInitStatus){
+          rInitDone := False
+        }
         goto(INIT)
       }
     }

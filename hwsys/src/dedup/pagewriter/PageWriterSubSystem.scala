@@ -12,8 +12,8 @@ import util.{CntDynmicBound, FrgmDemux}
 
 case class PageWriterConfig(dataWidth: Int = 512) {
   // Instr Decoder
-  val readyQueueLogDepth = 3
-  val waitingQueueLogDepth = 3
+  val readyQueueLogDepth = 10
+  val waitingQueueLogDepth = 10
   val instrTagWidth = if (readyQueueLogDepth > waitingQueueLogDepth) (readyQueueLogDepth + 1) else (waitingQueueLogDepth + 1)
 
   // val pgIdxWidth = 32
@@ -100,8 +100,17 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
   val pwConf = conf.pwConf
 
   /** queue here to avoid blocking the wrap pgIn, which is also forked to BF & SHA3 */
-  val frgmInQ    = io.pgStrmFrgmIn.queue(4096) // 128 x 64 fragment = 8192
-  val lookupResQ = io.lookupRes.queue(8)
+  val frgmInBuffer    = StreamFifo(Fragment(Bits(conf.wordSizeBit bits)), 8192) // 128 x 64 fragment = 8192
+  val lookupResBuffer = StreamFifo(HashTableLookupFSMRes(conf.htConf), 8)
+
+  frgmInBuffer.io.push    << io.pgStrmFrgmIn.pipelined(StreamPipe.FULL)
+  lookupResBuffer.io.push << io.lookupRes.pipelined(StreamPipe.FULL)
+
+  frgmInBuffer.io.flush    := io.initEn
+  lookupResBuffer.io.flush := io.initEn
+
+  val frgmInQ    = frgmInBuffer.io.pop   
+  val lookupResQ = lookupResBuffer.io.pop
 
   val instrDecoder = PageWriterInstrDecoder(conf)
 
@@ -109,10 +118,13 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
 
   val decodedReadyInstrQueue = StreamFifo(DecodedReadyInstr(conf), 1 << pwConf.readyQueueLogDepth)
 
+  decodedWaitingInstrQueue.io.flush := io.initEn
+  decodedReadyInstrQueue.io.flush   := io.initEn
+
   // decoder + decoded instr Queue
-  io.opStrmIn                        >> instrDecoder.io.rawInstrStream
-  instrDecoder.io.readyInstrStream   >> decodedReadyInstrQueue.io.push
-  instrDecoder.io.waitingInstrStream >> decodedWaitingInstrQueue.io.push
+  io.opStrmIn.pipelined(StreamPipe.FULL) >> instrDecoder.io.rawInstrStream
+  instrDecoder.io.readyInstrStream       >> decodedReadyInstrQueue.io.push
+  instrDecoder.io.waitingInstrStream     >> decodedWaitingInstrQueue.io.push
   
   val (lookupResToData, lookupResToInstr) = StreamFork2(lookupResQ)
   // output 0 Data in
@@ -134,18 +146,18 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
     pgNeedStoreValid := True
   }
 
-  io.SSDDataIn << frgmInQ.continueWhen(pgNeedStoreValid).throwWhen(!pgNeedStore)
+  io.SSDDataIn << frgmInQ.continueWhen(pgNeedStoreValid).throwWhen(!pgNeedStore).pipelined(StreamPipe.FULL)
   
   // output 1 Instr & header in, also Resp back to host
   val instrIssuer = PageWriterInstrIssuer(conf)
   instrIssuer.io.initEn              := io.initEn
-  instrIssuer.io.readyInstrStream    << decodedReadyInstrQueue.io.pop
-  instrIssuer.io.waitingInstrStream  << decodedWaitingInstrQueue.io.pop
-  instrIssuer.io.lookupResStream     << lookupResToInstr
+  instrIssuer.io.readyInstrStream    << decodedReadyInstrQueue.io.pop.pipelined(StreamPipe.FULL)
+  instrIssuer.io.waitingInstrStream  << decodedWaitingInstrQueue.io.pop.pipelined(StreamPipe.FULL)
+  instrIssuer.io.lookupResStream     << lookupResToInstr.pipelined(StreamPipe.FULL)
 
   // send instr to SSD and send resp back
   val mockSSDController = new Area{
-    val forkedFullInstrStream = StreamFork2(instrIssuer.io.instrIssueStream)
+    val forkedFullInstrStream = StreamFork2(instrIssuer.io.instrIssueStream.pipelined(StreamPipe.FULL))
     io.SSDInstrIn.translateFrom(forkedFullInstrStream._1){(storageInstr, fullInstr) =>
       storageInstr.SHA3Hash    := fullInstr.SHA3Hash
       storageInstr.RefCount    := fullInstr.RefCount
@@ -159,8 +171,12 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
         storageInstr.opCode := SSDOp.READ
       }
     }
+    
+    val fullInstrResQ = StreamFifo(CombinedFullInstr(conf), 4)
+    fullInstrResQ.io.push  << forkedFullInstrStream._2
+    fullInstrResQ.io.flush := io.initEn
 
-    io.res.translateFrom(forkedFullInstrStream._2.queue(4)){(resp, fullInstr) =>
+    io.res.translateFrom(fullInstrResQ.io.pop){(resp, fullInstr) =>
       resp.SHA3Hash      := fullInstr.SHA3Hash
       resp.RefCount      := fullInstr.RefCount
       resp.SSDLBA        := fullInstr.SSDLBA

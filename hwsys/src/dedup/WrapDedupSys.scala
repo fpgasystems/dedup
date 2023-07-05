@@ -46,10 +46,15 @@ class WrapDedupSys() extends Component with RenameIO {
   val ctrlR = new AxiLite4SlaveFactory(io.axi_ctrl, useWriteStrobes = true)
   val ctrlRByteSize = ctrlR.busDataWidth/8
   //REG: initEn (write only, addr: 0, bit: 0, auto-reset)
-  val rInit = ctrlR.createWriteOnly(Bool(), 0 << log2Up(ctrlRByteSize), 0)
-  rInit.clearWhen(rInit)
+  val rInitExtended = ctrlR.createWriteOnly(Bits(2 bits), 0 << log2Up(ctrlRByteSize), 0)
+  when (rInitExtended(0)){
+    rInitExtended := 0
+  }
+  val rInit = rInitExtended(0)
   dedupCore.io.initEn := rInit
   sysIntf.io.initEn   := rInit
+  hostIntf.io.initEn  := rInit
+  dedupCore.io.clearInitStatus := rInitExtended(1) && rInitExtended(0)
   //REG: initDone (readOnly, addr: 1, bit: 0)
   ctrlR.read(dedupCore.io.initDone, 1 << log2Up(ctrlRByteSize), 0)
   //REG: host interface (addr: 2-8)

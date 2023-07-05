@@ -17,30 +17,31 @@ import scala.collection.mutable
 import scala.collection.mutable._
 import scala.util.Random
 
-class DedupCoreNewTests extends AnyFunSuite {
-  def dedupCoreNewSim(): Unit = {
+class DedupCoreFuncTests extends AnyFunSuite {
+  def dedupCoreFuncSim(): Unit = {
 
     val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withVpdWave.withVCS.compile(new WrapDedupCoreTB())
     else SimConfig.withWave.compile(new WrapDedupCoreTB())
 
     compiledRTL.doSim { dut =>
-      DedupCoreNewSim.doSim(dut)
+      DedupCoreFuncSim.doSim(dut)
     }
   }
 
-  test("CoreNew Test: New Core with no BF and dummy allocator"){
-    dedupCoreNewSim()
+  test("Core Func Test: Core with no BF and dummy allocator"){
+    dedupCoreFuncSim()
   }
 }
 
 
-object DedupCoreNewSim {
+object DedupCoreFuncSim {
 
   def doSim(dut: WrapDedupCoreTB, verbose: Boolean = false): Unit = {
     dut.clockDomain.forkStimulus(period = 2)
     SimTimeout(1000000)
     dut.io.pgStrmIn.valid #= false
     dut.io.opStrmIn.valid #= false
+    dut.io.initEn #=false
     /** memory model for HashTab */
     SimDriver.instAxiMemSim(dut.io.axiMem, dut.clockDomain, None)
 
@@ -60,9 +61,9 @@ object DedupCoreNewSim {
     dut.io.SSDInstrIn.ready    #= true
 
     /** generate page stream */
-    val pageNum =  64
+    val pageNum =  256
     val dupFacotr = 2
-    val opNum = 2
+    val opNum = 1
     assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
     assert(pageNum%opNum==0, "pageNumber must be a multiple of operation number")
     val uniquePageNum = pageNum/dupFacotr
@@ -91,7 +92,7 @@ object DedupCoreNewSim {
     //   }
     // }
 
-    // 1,...,N, 1,...,N
+    // 1,...,N, 1,...,N, 1,...,N
     for (j <- 0 until dupFacotr) {
       for (i <- 0 until uniquePageNum) {
         for (k <- 0 until pageSize/bytePerWord) {
@@ -99,7 +100,7 @@ object DedupCoreNewSim {
         }
       }
     }
-    val goldenPgIsNew = List.tabulate[BigInt](pageNum){idx => 1 - (idx/(uniquePageNum))}
+    val goldenPgIsNew = List.tabulate[BigInt](pageNum){idx => if (idx < uniquePageNum) 1 else 0}
     val goldenpgRefCount = List.tabulate[BigInt](pageNum){idx => (idx/(uniquePageNum)) + 1}
     val goldenPgIdx = List.tabulate[BigInt](pageNum){idx => ((idx/pagePerOp)) * pagePerOp + idx} // start + idx
 
@@ -151,7 +152,7 @@ object DedupCoreNewSim {
         assert(hostLBAStart == goldenPgIdx(pageIdx))
         assert(hostLBALen == 1)
         assert(isExec == goldenPgIsNew(pageIdx))
-        assert(opCode == 0)
+        assert(opCode == 1)
 
         // println(s"pageIdx: ${pageIdx}")
         // println(s"${RefCount} == ${goldenpgRefCount(pageIdx)}")
