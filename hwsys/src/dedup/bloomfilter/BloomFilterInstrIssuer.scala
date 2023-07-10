@@ -50,7 +50,7 @@ case class BloomFilterInstrIssuer(conf: DedupConfig) extends Component{
     fire  := ready & valid
 
     // slicing: slice instruction with pagecount = 10 to 10x instr on one page 
-    val slicingCounter = Counter(conf.LBAWidth)
+    val slicingCounter = Counter(conf.LBAWidth bits)
     when(io.initEn){
       slicingCounter.clear()
     }.otherwise{

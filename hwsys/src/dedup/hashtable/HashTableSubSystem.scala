@@ -32,7 +32,7 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
   val cmdQDepth = 4
   
   // lookup engine settings
-  val sizeFSMArray = 4
+  val sizeFSMArray = 6
 }
 
 case class HashTableSSIO(conf: DedupConfig) extends Bundle {

@@ -42,6 +42,7 @@ object DedupCoreFuncSim {
     dut.io.pgStrmIn.valid #= false
     dut.io.opStrmIn.valid #= false
     dut.io.initEn #=false
+    dut.io.clearInitStatus #= false
     /** memory model for HashTab */
     SimDriver.instAxiMemSim(dut.io.axiMem, dut.clockDomain, None)
 
@@ -49,8 +50,10 @@ object DedupCoreFuncSim {
 
     /** init */
     dut.io.initEn #= true
+    dut.io.clearInitStatus #= true
     dut.clockDomain.waitSampling()
     dut.io.initEn #= false
+    dut.io.clearInitStatus #= false
     dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
     dut.io.factorThrou         #= 16
@@ -61,9 +64,9 @@ object DedupCoreFuncSim {
     dut.io.SSDInstrIn.ready    #= true
 
     /** generate page stream */
-    val pageNum =  256
+    val pageNum =  128
     val dupFacotr = 2
-    val opNum = 1
+    val opNum = 128
     assert(pageNum%dupFacotr==0, "pageNumber must be a multiple of dupFactor")
     assert(pageNum%opNum==0, "pageNumber must be a multiple of operation number")
     val uniquePageNum = pageNum/dupFacotr
@@ -182,6 +185,7 @@ case class WrapDedupCoreTB() extends Component{
     val pgResp   = master Stream (PageWriterResp(conf))
     /** control signals */
     val initEn   = in Bool()
+    val clearInitStatus = in Bool()
     val initDone = out Bool()
 
     /** hashTab memory interface */
@@ -208,6 +212,8 @@ case class WrapDedupCoreTB() extends Component{
   dedupCore.io.SSDDataOut  <> io.SSDDataOut 
   dedupCore.io.SSDInstrIn  <> io.SSDInstrIn 
   dedupCore.io.factorThrou <> io.factorThrou
+
+  dedupCore.io.clearInitStatus <> io.clearInitStatus
 
   // axi mux, RR arbitration
   val axiMux = AxiMux(conf.htConf.sizeFSMArray)
