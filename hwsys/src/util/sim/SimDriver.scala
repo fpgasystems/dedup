@@ -138,6 +138,7 @@ object SimDriver {
     def recvData(cd: ClockDomain): BigInt = {
       stream.ready #= true
       cd.waitSamplingWhere(stream.valid.toBoolean)
+      stream.ready #= false
       stream.payload.toBigInt
     }
 
