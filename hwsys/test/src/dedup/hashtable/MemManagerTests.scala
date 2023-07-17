@@ -43,7 +43,7 @@ object MemManagerSim {
     dut.io.initEn #= true
     dut.clockDomain.waitSampling()
     dut.io.initEn #= false
-    dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
+    // dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
     println(s"total idx: $totalIdxCount")
 

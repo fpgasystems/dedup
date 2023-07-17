@@ -29,7 +29,7 @@ case class MemManagerIO(htConf: HashTableConfig) extends Bundle {
   val axiConf     = Axi4ConfigAlveo.u55cHBM
   // init signals
   val initEn      = in Bool () 
-  val initDone    = out Bool ()
+  // val initDone    = out Bool ()
   // interface to other units
   val mallocIdx   = master Stream(UInt(htConf.ptrWidth bits))
   val freeIdx     = slave Stream(UInt(htConf.ptrWidth bits))
@@ -44,14 +44,14 @@ case class MemManager(htConf: HashTableConfig) extends Component {
   val conf = MemManagerConfig(htConf)
 
   val idxBufferDepth = conf.idxPerTransfer * 17
-  val initIdxBlockCount = 16
+  // val initIdxBlockCount = 16
 
   val idxBufferThr = idxBufferDepth - conf.idxPerTransfer
 
   val io = MemManagerIO(htConf)
   
-  val rInitDone = RegInit(False)
-  io.initDone := rInitDone
+  // val rInitDone = RegInit(False)
+  // io.initDone := rInitDone
 
   // on-chip buffer for free-up idx
   val idxBuffer = StreamFifo(UInt(htConf.ptrWidth bits), idxBufferDepth)
@@ -117,71 +117,79 @@ case class MemManager(htConf: HashTableConfig) extends Component {
   
   io.mallocIdx << StreamArbiterFactory.lowerFirst.transactionLock.onArgs(demuxIdxBufferPop(0), idxBank.io.pop, idxReleaseStreamCut)
 
-  val fsm = new StateMachine {
-    val IDLE         = new State with EntryPoint
-    val INIT, ONLINE = new State
-    
-    val initIdxCounter = (initIdxBlockCount > 0) generate Counter(conf.idxPerTransfer)
-    val initBlockCounter = (initIdxBlockCount > 0) generate Counter(initIdxBlockCount)
-
-    // default status
-    io.freeIdx.setBlocked()
-    idxBuffer.io.push.setIdle()
-    idxReleaseStream.setBlocked()
-    idxReleaseStreamCut.setIdle()
-
-    always{
-      when(io.initEn){
-        goto(INIT)
-      }
-    }
-
-    IDLE.whenIsActive{
-      io.freeIdx.setBlocked()
-      idxBuffer.io.push.setIdle()
-      idxReleaseStream.setBlocked()
-      idxReleaseStreamCut.setIdle()
-    }
-
-    INIT.onEntry{
-      if (initIdxBlockCount > 0){
-        initIdxCounter.clear()
-        initBlockCounter.clear()
-      }
-      idxCounter.clear()
-      idxAllReleased := False
-    }
-
-    INIT.whenIsActive{
-      if (initIdxBlockCount > 0){
-        io.freeIdx.setBlocked()
-        idxReleaseStream >> idxBuffer.io.push
-        idxReleaseStreamCut.setIdle()
-        when(idxReleaseStream.fire){
-          initIdxCounter.increment()
-        }
-        when(initIdxCounter.willOverflow){
-          initBlockCounter.increment()
-        }
-        when(initBlockCounter.willOverflow){
-          rInitDone := True
-          goto(ONLINE)
-        }
-      } else {
-        io.freeIdx.setBlocked()
-        idxBuffer.io.push.setIdle()
-        idxReleaseStream.setBlocked()
-        idxReleaseStreamCut.setIdle()
-        rInitDone := True
-        goto(ONLINE)
-      }
-    }
-
-    ONLINE.whenIsActive{
-      io.freeIdx >> idxBuffer.io.push
-      idxReleaseStream >> idxReleaseStreamCut
-    }
+  when(io.initEn){
+    idxCounter.clear()
+    idxAllReleased := False
   }
+
+  io.freeIdx >> idxBuffer.io.push
+  idxReleaseStream >> idxReleaseStreamCut
+
+//   val fsm = new StateMachine {
+//     val IDLE         = new State with EntryPoint
+//     val INIT, ONLINE = new State
+    
+//     val initIdxCounter = (initIdxBlockCount > 0) generate Counter(conf.idxPerTransfer)
+//     val initBlockCounter = (initIdxBlockCount > 0) generate Counter(initIdxBlockCount)
+
+//     // default status
+//     io.freeIdx.setBlocked()
+//     idxBuffer.io.push.setIdle()
+//     idxReleaseStream.setBlocked()
+//     idxReleaseStreamCut.setIdle()
+
+//     always{
+//       when(io.initEn){
+//         goto(INIT)
+//       }
+//     }
+
+//     IDLE.whenIsActive{
+//       io.freeIdx.setBlocked()
+//       idxBuffer.io.push.setIdle()
+//       idxReleaseStream.setBlocked()
+//       idxReleaseStreamCut.setIdle()
+//     }
+
+//     INIT.onEntry{
+//       if (initIdxBlockCount > 0){
+//         initIdxCounter.clear()
+//         initBlockCounter.clear()
+//       }
+//       idxCounter.clear()
+//       idxAllReleased := False
+//     }
+
+//     INIT.whenIsActive{
+//       if (initIdxBlockCount > 0){
+//         io.freeIdx.setBlocked()
+//         idxReleaseStream >> idxBuffer.io.push
+//         idxReleaseStreamCut.setIdle()
+//         when(idxReleaseStream.fire){
+//           initIdxCounter.increment()
+//         }
+//         when(initIdxCounter.willOverflow){
+//           initBlockCounter.increment()
+//         }
+//         when(initBlockCounter.willOverflow){
+//           rInitDone := True
+//           goto(ONLINE)
+//         }
+//       } else {
+//         io.freeIdx.setBlocked()
+//         idxBuffer.io.push.setIdle()
+//         idxReleaseStream.setBlocked()
+//         idxReleaseStreamCut.setIdle()
+//         rInitDone := True
+//         goto(ONLINE)
+//       }
+//     }
+
+//     ONLINE.whenIsActive{
+//       io.freeIdx >> idxBuffer.io.push
+//       idxReleaseStream >> idxReleaseStreamCut
+//     }
+//   }
 }
 
 case class AxiFifo(conf: MemManagerConfig) extends Component {
