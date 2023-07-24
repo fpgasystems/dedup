@@ -25,7 +25,7 @@ class WrapDedupSys() extends Component with RenameIO {
   val io = new Bundle {
     val axi_ctrl = slave(AxiLite4(AxiLite4Config(64, 64)))
     val hostd = new HostDataIO
-    val axi_mem = Vec(master(Axi4(Axi4ConfigAlveo.u55cHBM)), DedupConfig().htConf.sizeFSMArray)
+    val axi_mem = Vec(master(Axi4(Axi4ConfigAlveo.u55cHBM)), DedupConfig().htConf.sizeFSMArray + 1)
   }
 
   val dedupCore = new WrapDedupCore()
@@ -37,7 +37,7 @@ class WrapDedupSys() extends Component with RenameIO {
   sysIntf.io.mergedStrm << hostIntf.io.pgStrm.pipelined(StreamPipe.FULL)
   dedupCore.io.pgStrmIn << sysIntf.io.pageStrm
   dedupCore.io.opStrmIn << sysIntf.io.instrStrm
-  for (idx <- 0 until DedupConfig().htConf.sizeFSMArray){
+  for (idx <- 0 until DedupConfig().htConf.sizeFSMArray + 1){
     dedupCore.io.axiMem(idx).pipelined(StreamPipe.FULL) >> io.axi_mem(idx)
   }
   // io.axi_mem_0 << dedupCore.io.axiMem.pipelined(StreamPipe.FULL)

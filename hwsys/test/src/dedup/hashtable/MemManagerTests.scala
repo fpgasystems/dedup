@@ -32,18 +32,11 @@ object MemManagerSim {
   def doSim(dut: MemManagerTB, totalIdxCount: Int): Unit = {
     dut.clockDomain.forkStimulus(period = 2)
     SimTimeout(100000)
-    dut.io.initEn          #= false
     dut.io.freeIdx.valid   #= false
     dut.io.mallocIdx.ready #= false
     /** memory model */
     SimDriver.instAxiMemSim(dut.io.axiMem, dut.clockDomain, None)
     dut.clockDomain.waitSampling(10)
-
-    /** init */
-    dut.io.initEn #= true
-    dut.clockDomain.waitSampling()
-    dut.io.initEn #= false
-    // dut.clockDomain.waitSamplingWhere(dut.io.initDone.toBoolean)
 
     println(s"total idx: $totalIdxCount")
 

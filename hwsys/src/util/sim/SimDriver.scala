@@ -183,21 +183,27 @@ object SimDriver {
   def hostModel(cd: ClockDomain,
                 hostIO: HostDataIO,
                 hostSendQ: mutable.Queue[BigInt],
-                hostRecvQ: mutable.Queue[BigInt]
+                hostRecvQ: mutable.Queue[BigInt],
+                expRespCount: Int,
+                printEn: Boolean = false
              ): Unit = {
 
     val dWidth = hostIO.axis_host_sink.payload.tdata.getBitsWidth
 
     // read path
     fork {
-      while(true){
+      assert(hostSendQ.nonEmpty, "hostSendQ is empty!")
+      while(hostSendQ.nonEmpty){
         val rdReqD = hostIO.bpss_rd_req.recvData(cd)
-        assert(hostSendQ.nonEmpty, "hostSendQ is empty!")
         val reqByte = bigIntTruncVal(rdReqD, 47, 20).toInt
         for (i <- 0 until reqByte/(dWidth/8)) {
           val tkeep = ((BigInt(1) << dWidth/8) - 1) << dWidth
           val tlast = if (i == reqByte/(dWidth/8)-1) BigInt(1) << (dWidth+dWidth/8) else 0.toBigInt
-          hostIO.axis_host_sink.sendData(cd, hostSendQ.dequeue() + tkeep + tlast)
+          val tdata = hostSendQ.dequeue()
+          hostIO.axis_host_sink.sendData(cd, tdata + tkeep + tlast)
+          if (printEn) {
+            println(tdata)
+          }
         }
         hostIO.bpss_rd_done.sendData(cd, 0.toBigInt) // pid
       }
@@ -205,7 +211,7 @@ object SimDriver {
 
     // write path
     fork {
-      while(true){
+      while(hostRecvQ.length < expRespCount){
         val wrReqD = hostIO.bpss_wr_req.recvData(cd)
         val reqByte = bigIntTruncVal(wrReqD, 47, 20).toInt
         for (i <- 0 until reqByte/(dWidth/8)) {

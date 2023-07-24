@@ -12,8 +12,8 @@ import util.{CntDynmicBound, FrgmDemux}
 
 case class PageWriterConfig(dataWidth: Int = 512) {
   // Instr Decoder
-  val readyQueueLogDepth = 10
-  val waitingQueueLogDepth = 10
+  val readyQueueLogDepth = 8
+  val waitingQueueLogDepth = 8
   val instrTagWidth = if (readyQueueLogDepth > waitingQueueLogDepth) (readyQueueLogDepth + 1) else (waitingQueueLogDepth + 1)
 
   // val pgIdxWidth = 32
@@ -100,16 +100,19 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
   val pwConf = conf.pwConf
 
   /** queue here to avoid blocking the wrap pgIn, which is also forked to BF & SHA3 */
-  val frgmInBuffer    = StreamFifo(Fragment(Bits(conf.wordSizeBit bits)), 8192) // 128 x 64 fragment = 8192
-  val lookupResBuffer = StreamFifo(HashTableLookupFSMRes(conf.htConf), 8)
+  val frgmInBuffer1    = StreamFifo(Fragment(Bits(conf.wordSizeBit bits)), 8192) // 128 x 64 fragment = 8192
+  val frgmInBuffer2    = StreamFifo(Fragment(Bits(conf.wordSizeBit bits)), 8192) // 128 x 64 fragment = 8192
+  val lookupResBuffer = StreamFifo(HashTableLookupFSMRes(conf.htConf), 4)
 
-  frgmInBuffer.io.push    << io.pgStrmFrgmIn.pipelined(StreamPipe.FULL)
+  frgmInBuffer1.io.push   << io.pgStrmFrgmIn.pipelined(StreamPipe.FULL)
+  frgmInBuffer2.io.push   << frgmInBuffer1.io.pop
   lookupResBuffer.io.push << io.lookupRes.pipelined(StreamPipe.FULL)
 
-  frgmInBuffer.io.flush    := io.initEn
+  frgmInBuffer1.io.flush   := io.initEn
+  frgmInBuffer2.io.flush   := io.initEn
   lookupResBuffer.io.flush := io.initEn
 
-  val frgmInQ    = frgmInBuffer.io.pop   
+  val frgmInQ    = frgmInBuffer2.io.pop   
   val lookupResQ = lookupResBuffer.io.pop
 
   val instrDecoder = PageWriterInstrDecoder(conf)

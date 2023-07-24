@@ -31,9 +31,9 @@ case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
 
   val dispatchedInstrStream = StreamDispatcherSequential(io.instrStrmIn, htConf.sizeFSMArray)
 
-  val fsmInstrBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMInstr(htConf), 4))
+  val fsmInstrBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMInstr(htConf), 8))
 
-  val fsmResBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMRes(htConf), 4))
+  val fsmResBufferArray = Array.fill(htConf.sizeFSMArray)(new StreamFifo(HashTableLookupFSMRes(htConf), 8))
 
   val lockManager = HashTableLookupLockManager(htConf)
 
@@ -55,7 +55,7 @@ case class HashTableLookupEngine(htConf: HashTableConfig) extends Component {
 
   io.res << StreamArbiterFactory.sequentialOrder.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmResBufferArray(idx).io.pop)).pipelined(StreamPipe.FULL)
 
-  io.freeIdx << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.freeIdx)).pipelined(StreamPipe.FULL)
+  io.freeIdx << StreamArbiterFactory.roundRobin.transactionLock.on(Array.tabulate(htConf.sizeFSMArray)(idx => fsmArray(idx).io.freeIdx.pipelined(StreamPipe.FULL)))
 
   // connect mallocIdx to fsmArray using roundRobin, but arbitrate on ready signal
   // impl by modifying StreamArbiterFactory.roundRobin.transactionLock

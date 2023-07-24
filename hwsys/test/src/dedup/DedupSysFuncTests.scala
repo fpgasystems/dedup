@@ -28,7 +28,7 @@ class DedupSysFuncTests extends AnyFunSuite {
     }
   }
 
-  test("Sys Func Test: Core with no BF and dummy allocator"){
+  test("Sys Func Test"){
     dedupSysFuncSim()
   }
 }
@@ -133,7 +133,7 @@ object DedupSysFuncSim {
     val pgRespQ: mutable.Queue[BigInt] = mutable.Queue()
     println(s"Total input buffer size: ${dedupSysInputData.size}")
     // host model
-    hostModel(dut.clockDomain, dut.io.hostd, dedupSysInputData, pgRespQ)
+    hostModel(dut.clockDomain, dut.io.hostd, dedupSysInputData, pgRespQ, pageNum)
 
     /** AXIL Control Reg */
     setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 0, 1) // INITEN
@@ -165,7 +165,8 @@ object DedupSysFuncSim {
     println(s"rdDone: $rdDone, wrDone: $wrDone")
 
     // parse the pgRespQ
-    val pgRespData: mutable.Queue[BigInt] = mutable.Queue()
+    val dedupSysInputData2: mutable.Queue[BigInt] = mutable.Queue()
+    val uniquePageSha3: mutable.ListBuffer[BigInt] = ListBuffer()
 
     var respIdx = 0
     while(pgRespQ.nonEmpty) {
@@ -183,6 +184,10 @@ object DedupSysFuncSim {
       assert(hostLBALen == 1)
       assert(isExec == goldenPgIsNew(respIdx))
       assert(opCode == 1)
+      if (respIdx < uniquePageNum){
+        dedupSysInputData2.enqueue(SimInstrHelpers.eraseInstrGen(0,SHA3Hash))
+        uniquePageSha3.append(SHA3Hash)
+      }
 
       // println(s"pageIdx: ${respIdx}")
       // println(s"${RefCount} == ${goldenpgRefCount(respIdx)}")
@@ -192,6 +197,66 @@ object DedupSysFuncSim {
       // println(s"${opCode} == 0")
       respIdx = respIdx + 1
     }
+    assert(pgRespQ.isEmpty, "Ah???")
+
+    // erase all
+    println("clean all")
+    val inputBufferUsefulLen2 = uniquePageNum
+    val inputBufferTotalLen2  = ((inputBufferUsefulLen2 + 63)/ 64)*64
+    val inputBufferPaddingLen2 = inputBufferTotalLen2 - inputBufferUsefulLen2
+    for (opIdx <- 0 until inputBufferPaddingLen2){
+      dedupSysInputData2.enqueue(SimInstrHelpers.nopGen())
+    }
+    
+    val pgRespQ2: mutable.Queue[BigInt] = mutable.Queue()
+    println(s"clean data len = ${dedupSysInputData2.length} words")
+    hostModel(dut.clockDomain, dut.io.hostd, dedupSysInputData2, pgRespQ2, uniquePageNum)
+    // for (opIdx <- 0 until inputBufferTotalLen2){
+    //   dedupSysInputData.enqueue(dedupSysInputData.dequeue())
+    // }
+
+    setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 6<<3, inputBufferTotalLen2/64) // CNT = pageNum
+    setAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 2<<3, 1)
+
+    while(dedupSysInputData.nonEmpty) {
+      dut.clockDomain.waitSampling(10)
+    }
+    // wait for tail pages processing
+    while (readAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 9 << 3) < uniquePageNum/16) {
+      dut.clockDomain.waitSampling(100)
+    }
+
+    val rdDone2 = readAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 8<<3)
+    val wrDone2 = readAxi4LiteReg(dut.clockDomain, dut.io.axi_ctrl, 9<<3)
+    println(s"rdDone: $rdDone2, wrDone: $wrDone2")
+
+    var respIdx2 = 0
+    while(pgRespQ2.nonEmpty) {
+      val respData     = pgRespQ2.dequeue()
+      val SHA3Hash     = SimHelpers.bigIntTruncVal(respData, 255, 0)
+      val RefCount     = SimHelpers.bigIntTruncVal(respData, 287, 256)
+      val SSDLBA       = SimHelpers.bigIntTruncVal(respData, 319, 288)
+      val hostLBAStart = SimHelpers.bigIntTruncVal(respData, 351, 320)
+      val hostLBALen   = SimHelpers.bigIntTruncVal(respData, 383, 352)
+      val isExec       = SimHelpers.bigIntTruncVal(respData, 509, 509)
+      val opCode       = SimHelpers.bigIntTruncVal(respData, 511, 510)
+      
+      assert(SHA3Hash == uniquePageSha3(respIdx2))
+      assert(RefCount == dupFacotr - 1)
+      assert(hostLBAStart == 0)
+      assert(hostLBALen == 1)
+      assert(isExec == { if (dupFacotr == 1) 1 else 0})
+      assert(opCode == 2)
+
+      // println(s"pageIdx: ${respIdx2}")
+      // println(s"${RefCount} == ${goldenpgRefCount(respIdx2)}")
+      // println(s"${hostLBAStart} == ${goldenPgIdx(respIdx2)}")
+      // println(s"${hostLBALen} == 1")
+      // println(s"${isExec} == ${{ if (dupFacotr == 1) 1 else 0}}")
+      // println(s"${opCode} == 0")
+      respIdx2 = respIdx2 + 1
+    }
+    assert(pgRespQ2.isEmpty, "Ah???")
   }
 }
 
@@ -212,8 +277,8 @@ case class WrapDedupSysTB() extends Component{
   dedupSys.io.hostd    <> io.hostd
 
   // axi mux, RR arbitration
-  val axiMux = AxiMux(conf.htConf.sizeFSMArray)
-  for (idx <- 0 until conf.htConf.sizeFSMArray){
+  val axiMux = AxiMux(conf.htConf.sizeFSMArray + 1)
+  for (idx <- 0 until conf.htConf.sizeFSMArray + 1){
     axiMux.io.axiIn(idx) << dedupSys.io.axi_mem(idx)
   }
   axiMux.io.axiOut >> io.axi_mem

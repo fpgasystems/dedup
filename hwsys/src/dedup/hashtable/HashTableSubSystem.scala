@@ -5,16 +5,16 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axi._
 
-case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTableSize: Int = (1<<20), expBucketSize: Int = 32, hashTableOffset: BigInt = 0) {
+case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTableSize: BigInt = ((BigInt(1) << 27) + (BigInt(1) << 26)), expBucketSize: Int = 32, hashTableOffset: BigInt = (BigInt(1) << 30), bfEnable: Boolean = true) {
   // Instr Decoder
-  val readyQueueLogDepth = 10
-  val waitingQueueLogDepth = 10
+  val readyQueueLogDepth = 7
+  val waitingQueueLogDepth = 7
   val instrTagWidth = if (readyQueueLogDepth > waitingQueueLogDepth) (readyQueueLogDepth + 1) else (waitingQueueLogDepth + 1)
 
   assert(hashTableSize%expBucketSize==0, "Hash table size (#entry) should be a multiple of bucketSize")
   // #hash index
   val idxBucketWidth = log2Up(hashTableSize / expBucketSize)
-  val nBucket = 1 << idxBucketWidth
+  val nBucket: BigInt = 1 << idxBucketWidth
   // property of bucket metadata
   val bucketMetaDataType = Bits(512 bits)
   val bucketMetaDataByteSize = bucketMetaDataType.getBitsWidth/8
@@ -33,6 +33,11 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
   
   // lookup engine settings
   val sizeFSMArray = 6
+
+  // bloom filter config
+  val mWidth = 5
+  val m = (1 << mWidth)
+  val k = 3
 }
 
 case class HashTableSSIO(conf: DedupConfig) extends Bundle {
@@ -44,7 +49,7 @@ case class HashTableSSIO(conf: DedupConfig) extends Bundle {
   val res          = master Stream (HashTableLookupFSMRes(conf.htConf))
   /** DRAM interface */
   val axiConf     = Axi4ConfigAlveo.u55cHBM
-  val axiMem      = Vec(master(Axi4(axiConf)), conf.htConf.sizeFSMArray)
+  val axiMem      = Vec(master(Axi4(axiConf)), conf.htConf.sizeFSMArray + 1)
 }
 
 class HashTableSubSystem(conf : DedupConfig) extends Component {
@@ -54,7 +59,7 @@ class HashTableSubSystem(conf : DedupConfig) extends Component {
 
   val sha3Grp   = new SHA3Group(conf.sha3Conf)
 
-  val SHA3ResQueue = StreamFifo(Bits(htConf.hashValWidth bits), 4)
+  val SHA3ResQueue = StreamFifo(Bits(htConf.hashValWidth bits), 64)
   
   val instrDecoder = HashTableInstrDecoder(conf)
 
@@ -66,18 +71,8 @@ class HashTableSubSystem(conf : DedupConfig) extends Component {
 
   val lookupEngine = HashTableLookupEngine(htConf)
 
-  val memAllocator = new Area{
-    // dummy allocator
-    val io = new Bundle{
-      val mallocIdx   = Stream(UInt(htConf.ptrWidth bits))
-      val freeIdx     = Stream(UInt(htConf.ptrWidth bits))
-    }
-
-    io.freeIdx.freeRun()
-    val freeIdxGen = Counter(htConf.ptrWidth bits, io.mallocIdx.fire)
-    io.mallocIdx.payload := freeIdxGen.value + U(1)
-    io.mallocIdx.valid   := True
-  }
+  val memAllocator = MemManager(htConf)
+  // memAllocator.io.initEn := io.initEn
 
   io.initDone := lookupEngine.io.initDone
 
@@ -111,6 +106,7 @@ class HashTableSubSystem(conf : DedupConfig) extends Component {
   for (idx <- 0 until htConf.sizeFSMArray){
     lookupEngine.io.axiMem(idx) >> io.axiMem(idx)
   }
+  memAllocator.io.axiMem >> io.axiMem(htConf.sizeFSMArray)
 
   lookupEngine.io.mallocIdx          << memAllocator.io.mallocIdx
   lookupEngine.io.freeIdx            >> memAllocator.io.freeIdx

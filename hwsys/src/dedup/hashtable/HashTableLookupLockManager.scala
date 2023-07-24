@@ -42,7 +42,12 @@ case class HashTableLookupLockManager(htConf: HashTableConfig) extends Component
 
   val io = HashTableLookupLockManagerIO(htConf)
 
-  val fsmLockReq = StreamArbiterFactory.roundRobin.transactionLock.on(io.fsmArrayLockReq)
+  val fsmArrayLockReqPipelined = Vec(Stream(FSMLockRequest(htConf)), htConf.sizeFSMArray)
+  for (idx <- 0 until htConf.sizeFSMArray){
+    // fsmArrayLockReqPipelined(idx) << io.fsmArrayLockReq(idx).pipelined(StreamPipe.FULL)
+    fsmArrayLockReqPipelined(idx) << io.fsmArrayLockReq(idx)
+  }
+  val fsmLockReq = StreamArbiterFactory.roundRobin.transactionLock.on(fsmArrayLockReqPipelined).pipelined(StreamPipe.FULL)
 
   /*Parking Queue cannot be too shallow
     if all colide and lock acquire requests cannot fit into parking queue,

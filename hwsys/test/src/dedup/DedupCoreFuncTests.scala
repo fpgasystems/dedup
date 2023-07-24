@@ -28,7 +28,7 @@ class DedupCoreFuncTests extends AnyFunSuite {
     }
   }
 
-  test("Core Func Test: Core with no BF and dummy allocator"){
+  test("Core Func Test"){
     dedupCoreFuncSim()
   }
 }
@@ -216,8 +216,8 @@ case class WrapDedupCoreTB() extends Component{
   dedupCore.io.clearInitStatus <> io.clearInitStatus
 
   // axi mux, RR arbitration
-  val axiMux = AxiMux(conf.htConf.sizeFSMArray)
-  for (idx <- 0 until conf.htConf.sizeFSMArray){
+  val axiMux = AxiMux(conf.htConf.sizeFSMArray + 1)
+  for (idx <- 0 until conf.htConf.sizeFSMArray + 1){
     axiMux.io.axiIn(idx) << dedupCore.io.axiMem(idx)
   }
   axiMux.io.axiOut >> io.axiMem

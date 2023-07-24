@@ -41,6 +41,7 @@ object HashTableFSMTBSim {
     dut.clockDomain.forkStimulus(period = 2)
     SimTimeout(1000000)
     dut.io.initEn            #= false 
+    dut.io.clearInitStatus   #= false
     dut.io.instrStrmIn.valid #= false
     dut.io.res.ready         #= false
     dut.io.mallocIdx.valid   #= false
@@ -63,7 +64,7 @@ object HashTableFSMTBSim {
     val bucketAvgLen = 8
     val numUniqueSHA3 = numBucketUsed * bucketAvgLen
 
-    val uniqueSHA3refCount = 8
+    val uniqueSHA3refCount = 2
     val bucketMask = ((BigInt(1) << (log2Up(htConf.nBucket) - log2Up(numBucketUsed)) - 1) << log2Up(numBucketUsed))
     val uniqueSHA3 = List.fill[BigInt](numUniqueSHA3)(BigInt(256, randomWithSeed) &~ bucketMask)
 
@@ -204,15 +205,42 @@ object HashTableFSMTBSim {
     pseudoFreeIdxWatch2.join()
     resWatch2.join()
 
-    // // check same result
-    // (BFResNew, BFResOld).zipped.map{ case (output, expected) =>
-    //   assert(output == expected)
-    // }
+    // Test part 3: insert all to see BF reconstruction
+    /* Stimuli injection */
+    val instrStrmPush3 = fork {
+      for (instrIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        dut.io.instrStrmIn.sendData(dut.clockDomain, instrStrmData(instrIdx))
+      }
+    }
+
+    /* pseudo malloc*/
+    val pseudoMallocIdxPush3 = fork {
+      for (newBlkIdx <- 0 until numUniqueSHA3) {
+        dut.io.mallocIdx.sendData(dut.clockDomain, BigInt(newBlkIdx+1))
+      }
+    }
+
+    /* pseudo freeUp*/
+    dut.io.freeIdx.ready     #= false
+
+    /* Res watch*/
+    val resWatch3 = fork {
+      for (respIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        val respData = dut.io.res.recvData(dut.clockDomain)
+        val decodedRealOutput = HashTableLookupHelpers.decodeRes(respData)
+        assert(decodedRealOutput == goldenResponse(respIdx))
+      }
+    }
+
+    instrStrmPush3.join()
+    pseudoMallocIdxPush3.join()
+    resWatch3.join()
   }
 }
 
 object HashTableLookupHelpers{
-  val htConf = DedupConfig().htConf
+  val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = 1024*8, expBucketSize = 128, hashTableOffset = (BigInt(1) << 30), bfEnable = false)
+  // val htConf = DedupConfig().htConf
 
   def insertInstrGen(SHA3 : BigInt) : BigInt = {
     val sha3_trunc = SimHelpers.bigIntTruncVal(SHA3, 255, 0)
@@ -246,12 +274,11 @@ object HashTableLookupHelpers{
 
 case class HashTableLookupFSMTB() extends Component{
 
-  val conf = DedupConfig()
-
   val htConf = HashTableLookupHelpers.htConf
 
   val io = new Bundle {
     val initEn      = in Bool()
+    val clearInitStatus = in Bool()
     val initDone    = out Bool()
     // execution results
     val instrStrmIn = slave Stream(HashTableLookupFSMInstr(htConf))
@@ -270,6 +297,7 @@ case class HashTableLookupFSMTB() extends Component{
   val lookupFSM = HashTableLookupFSM(htConf)
   
   memInitializer.io.initEn := io.initEn
+  memInitializer.io.clearInitStatus := io.clearInitStatus
   lookupFSM.io.initEn      := io.initEn
 
   val isMemInitDone = memInitializer.io.initDone

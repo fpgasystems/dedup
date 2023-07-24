@@ -17,7 +17,7 @@ import scala.collection.mutable._
 import scala.util.Random
 
 class HashTableLookupEngineTests extends AnyFunSuite {
-  test("HashTableLookupEngineTest: dummy allocator"){
+  test("HashTableLookupEngineTest"){
     // dummy allocator with sequential dispatcher in mallocIdx
     // we can predict the allocated address in simple golden model in this setup
     val compiledRTL = if (sys.env.contains("VCS_HOME")) SimConfig.withVpdWave.withVCS.compile(new HashTableLookupEngineTB())
@@ -35,11 +35,10 @@ object HashTableLookupEngineSim {
     val randomWithSeed = new Random()
     dut.clockDomain.forkStimulus(period = 2)
     SimTimeout(2000000)
-    dut.io.initEn            #= false 
+    dut.io.initEn            #= false
+    dut.io.clearInitStatus   #= false
     dut.io.instrStrmIn.valid #= false
     dut.io.res.ready         #= false
-    dut.io.mallocIdx.valid   #= false
-    dut.io.freeIdx.ready     #= false
 
     /** memory model for HashTab */
     SimDriver.instAxiMemSim(dut.io.axiMem, dut.clockDomain, None)
@@ -129,16 +128,6 @@ object HashTableLookupEngineSim {
       }
     }
 
-    /* pseudo malloc*/
-    val pseudoMallocIdxPush = fork {
-      for (newBlkIdx <- 0 until numUniqueSHA3) {
-        dut.io.mallocIdx.sendData(dut.clockDomain, BigInt(newBlkIdx+1))
-      }
-    }
-
-    /* pseudo freeUp*/
-    dut.io.freeIdx.ready     #= false
-
     /* Res watch*/
     val resWatch = fork {
       for (respIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
@@ -156,7 +145,6 @@ object HashTableLookupEngineSim {
     }
 
     instrStrmPush.join()
-    pseudoMallocIdxPush.join()
     resWatch.join()
 
     // Test part 2: delete all
@@ -186,17 +174,6 @@ object HashTableLookupEngineSim {
       }
     }
 
-    dut.io.mallocIdx.valid     #= false
-
-    /* pseudo free*/
-    val pseudoFreeIdxWatch2 = fork {
-      for (newBlkIdx <- 0 until numUniqueSHA3) {
-        val freeIdx = dut.io.freeIdx.recvData(dut.clockDomain)
-        assert((freeIdx >= 1) && (freeIdx < numUniqueSHA3 + 1))
-      }
-    }
-
-
     /* Res watch*/
     val resWatch2 = fork {
       for (respIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
@@ -209,45 +186,40 @@ object HashTableLookupEngineSim {
     }
 
     instrStrmPush2.join()
-    pseudoFreeIdxWatch2.join()
     resWatch2.join()
-
-    // // check same result
-    // (BFResNew, BFResOld).zipped.map{ case (output, expected) =>
-    //   assert(output == expected)
-    // }
   }
 }
 
 case class HashTableLookupEngineTB() extends Component{
 
-  val conf = DedupConfig()
-
-  val htConf = conf.htConf
+  val htConf = HashTableLookupHelpers.htConf
 
   val io = new Bundle {
     val initEn      = in Bool()
+    val clearInitStatus = in Bool()
     val initDone    = out Bool()
     // execution results
     val instrStrmIn = slave Stream(HashTableLookupFSMInstr(htConf))
     val res         = master Stream(HashTableLookupFSMRes(htConf))
-    // To Allocator
-    val mallocIdx   = slave Stream(UInt(htConf.ptrWidth bits))
-    val freeIdx     = master Stream(UInt(htConf.ptrWidth bits))
     /** DRAM interface */
     val axiConf     = Axi4ConfigAlveo.u55cHBM
     val axiMem      = master(Axi4(axiConf))
   }
 
   val lookupEngine = HashTableLookupEngine(htConf)
+  val memAllocator = MemManager(htConf)
   lookupEngine.io.initEn      := io.initEn
+  lookupEngine.io.clearInitStatus := io.clearInitStatus
+  // memAllocator.io.initEn      := io.initEn
   io.initDone                 := lookupEngine.io.initDone
   lookupEngine.io.instrStrmIn << io.instrStrmIn
   io.res                      << lookupEngine.io.res
-  lookupEngine.io.mallocIdx   << io.mallocIdx
-  io.freeIdx                  << lookupEngine.io.freeIdx
+  lookupEngine.io.mallocIdx   << memAllocator.io.mallocIdx
+  lookupEngine.io.freeIdx     >> memAllocator.io.freeIdx
 
-  val axiMux = AxiMux(htConf.sizeFSMArray)
+  val axiMux = AxiMux(htConf.sizeFSMArray + 1)
+  axiMux.io.axiIn(htConf.sizeFSMArray) << memAllocator.io.axiMem
+  // memAllocator.io.axiMem.setBlocked()
   for (idx <- 0 until htConf.sizeFSMArray){
     axiMux.io.axiIn(idx) << lookupEngine.io.axiMem(idx)
   }

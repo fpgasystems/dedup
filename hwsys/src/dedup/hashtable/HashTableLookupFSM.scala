@@ -32,18 +32,22 @@ case class HashTableLookupFSMRes (htConf: HashTableConfig) extends Bundle {
 case class HashTableBucketMetaData (htConf: HashTableConfig) extends Bundle {
   // Block Addr = entry idx
   val head    = UInt(htConf.ptrWidth bits)
-  val tail    = UInt(htConf.ptrWidth bits)
-  // lenth of the linked list
-  val len     = UInt(htConf.ptrWidth bits)
-  val padding = UInt((512 - 3 * htConf.ptrWidth) bits)
+  val bloomFilter = (htConf.bfEnable) generate (Bits(htConf.m bits))
+  val paddingWidth = if (htConf.bfEnable) (512 - htConf.ptrWidth - htConf.m) else (512 - htConf.ptrWidth)
+  val padding = UInt(paddingWidth bits)
+  // val tail    = UInt(htConf.ptrWidth bits)
+  // // lenth of the linked list
+  // val len     = UInt(htConf.ptrWidth bits)
+  // val padding = UInt((512 - 3 * htConf.ptrWidth) bits)
 }
 
 case class HashTableBucketMetaDataNoPadding (htConf: HashTableConfig) extends Bundle {
   // Block Addr = entry idx
   val head    = UInt(htConf.ptrWidth bits)
-  val tail    = UInt(htConf.ptrWidth bits)
-  // lenth of the linked list
-  val len     = UInt(htConf.ptrWidth bits)
+  val bloomFilter = (htConf.bfEnable) generate (Bits(htConf.m bits))
+  // val tail    = UInt(htConf.ptrWidth bits)
+  // // lenth of the linked list
+  // val len     = UInt(htConf.ptrWidth bits)
 }
 
 case class HashTableEntry (htConf: HashTableConfig) extends Bundle {
@@ -122,6 +126,16 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
 
   val instr      = Reg(HashTableLookupFSMInstr(htConf))
   val idxBucket  = instr.SHA3Hash(htConf.idxBucketWidth-1 downto 0).asUInt // lsb as the bucket index
+  val bfLookupIdx = (htConf.bfEnable) generate (Vec(UInt(htConf.mWidth bits), htConf.k))
+  val bfLookupMask = (htConf.bfEnable) generate (Vec(Bits(htConf.m bits), htConf.k))
+  if (htConf.bfEnable){
+    bfLookupIdx.assignFromBits(instr.SHA3Hash(htConf.hashValWidth -1 downto htConf.hashValWidth - (htConf.mWidth * htConf.k)))
+    for (idx <- 0 until htConf.k){
+      bfLookupMask(idx) := (U(1) << bfLookupIdx(idx)).asBits
+    }
+  }
+  val bfLookupMaskReduced = (htConf.bfEnable) generate (bfLookupMask.reduceBalancedTree(_ | _))
+  val rBFLookupMaskReduced = (htConf.bfEnable) generate (Reg(Bits(htConf.m bits)) init 0)
 
   /* two additional pipeline stages for readRsp, otherwise timing not meet in PnR */
   val readRspStage1 = io.axiMem.readRsp // already pipelined in dedupSys
@@ -129,11 +143,24 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
   readRspStage2.setBlocked()
 
   val hashComparator = new Area{
+    // stage 1
+    // for hash comparison
     val decodedHashTableEntry = HashTableEntryNoPadding(htConf)
     decodedHashTableEntry.assignFromBits(readRspStage1.data, decodedHashTableEntry.getBitsWidth - 1, 0)
     val readHashSliced   = decodedHashTableEntry.SHA3Hash.subdivideIn(8 slices)
     val instrHashSliced  = instr.SHA3Hash.subdivideIn(8 slices)
+    // for BF reconstruction
+    val bfIdx = (htConf.bfEnable) generate (Vec(UInt(htConf.mWidth bits), htConf.k))
+    val bfMask = (htConf.bfEnable) generate (Vec(Bits(htConf.m bits), htConf.k))
+    if (htConf.bfEnable){
+      bfIdx.assignFromBits(decodedHashTableEntry.SHA3Hash(htConf.hashValWidth -1 downto htConf.hashValWidth - (htConf.mWidth * htConf.k)))
+      for (idx <- 0 until htConf.k){
+        bfMask(idx) := (U(1) << bfIdx(idx)).asBits
+      }
+    }
+    // stage 2
     val equalCheckStage1 = RegNext((readHashSliced, instrHashSliced).zipped.map(_ === _).asBits())
+    val bfMaskReduced    = (htConf.bfEnable) generate (RegNext(bfMask.reduceBalancedTree(_ | _)))
     val isHashValMatch   = equalCheckStage1.andR
   }
 
@@ -190,15 +217,25 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
     val fetchMetaDataAXIIssued   = Reg(Bool())
     val fetchMetaDataAXIReceived = Reg(Bool())
     val bucketMetaData           = Reg(HashTableBucketMetaDataNoPadding(htConf))
+    val bloomFilterLookupRes     = (htConf.bfEnable) generate Reg(Bool())
+    val reconstructedBloomFilter = (htConf.bfEnable) generate Reg(Bits(htConf.m bits))
     val nextEntryIdx             = Reg(UInt(htConf.ptrWidth bits))
 
     FETCH_METADATA.onEntry{
       fetchMetaDataAXIIssued   := False
       fetchMetaDataAXIReceived := False
       bucketMetaData.head      := 0
-      bucketMetaData.tail      := 0
-      bucketMetaData.len       := 0
+      if (htConf.bfEnable){
+        bucketMetaData.bloomFilter := 0
+        bloomFilterLookupRes     := True
+        reconstructedBloomFilter := 0
+      }
+      // bucketMetaData.tail      := 0
+      // bucketMetaData.len       := 0
       nextEntryIdx             := 0
+      if (htConf.bfEnable){
+        rBFLookupMaskReduced     := bfLookupMaskReduced
+      }
     }
 
     FETCH_METADATA.whenIsActive{
@@ -234,6 +271,9 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
           val decodedMetaData = HashTableBucketMetaDataNoPadding(htConf)
           decodedMetaData.assignFromBits(readRspStage2.data, bucketMetaData.getBitsWidth - 1, 0)
           bucketMetaData := decodedMetaData
+          if (htConf.bfEnable){
+            bloomFilterLookupRes := ((decodedMetaData.bloomFilter & rBFLookupMaskReduced) === rBFLookupMaskReduced)
+          }
           nextEntryIdx   := decodedMetaData.head
           goto(FETCH_ENTRY)
         }
@@ -287,11 +327,23 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
       readRspStage2.setBlocked()
 
       // fetch entry
-      when((bucketMetaData.head === 0 ) | (bucketMetaData.tail === 0 ) | (bucketMetaData.len === 0 )){
-        // empty bucket, no lookup anymore
-        goto(EXEC)
-      }.elsewhen(nextEntryIdx === 0){
-        // we are at the last entry, no lookup anymore
+      val bypassCondition = Bool()
+      if (htConf.bfEnable) {
+        bypassCondition := ((bucketMetaData.head === 0) || (!bloomFilterLookupRes) || (nextEntryIdx === 0))
+      } else {
+        bypassCondition := ((bucketMetaData.head === 0) || (nextEntryIdx === 0))
+      }
+      // when((bucketMetaData.head === 0 ) | (bucketMetaData.tail === 0 ) | (bucketMetaData.len === 0 )){
+      // when((bucketMetaData.head === 0)){
+      //   // empty bucket, no lookup anymore
+      //   goto(EXEC)
+      // }.elsewhen(!bloomFilterLookupRes){
+      //   // not in bloom filter, bypass
+      //   goto(EXEC)
+      // }.elsewhen(nextEntryIdx === 0){
+      //   // we are at the last entry, no lookup anymore
+      //   goto(EXEC)
+      when(bypassCondition){
         goto(EXEC)
       }.otherwise{
         // bucket not empty, and not the last entry, fetch entry
@@ -312,6 +364,9 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
           currentEntryIdx   := nextEntryIdx
           currentEntryValid := True
           nextEntryIdx      := decodedHashTableEntry.next
+          if (htConf.bfEnable) {
+            reconstructedBloomFilter := (reconstructedBloomFilter | hashComparator.bfMaskReduced)
+          }
 
           when(hashComparator.isHashValMatch){
             // find
@@ -326,9 +381,9 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
     val freeDone   = Reg(Bool())
 
     // bucket status
-    val resIsEmptyBucket  = (!prevEntryValid) & (!currentEntryValid)
-    val resIsFirstElement = (!prevEntryValid) & (currentEntryValid)
-    val resIsNormal       = (prevEntryValid) & (currentEntryValid)
+    // val resIsEmptyBucket  = (!prevEntryValid) & (!currentEntryValid)
+    // val resIsFirstElement = (!prevEntryValid) & (currentEntryValid)
+    // val resIsNormal       = (prevEntryValid) & (currentEntryValid)
 
     // control write back True => need to write back
     val needMetaDataWriteBack     = Reg(Bool())
@@ -370,13 +425,13 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
           // new, insert
           io.mallocIdx.ready    := !mallocDone
           // update everything
-          needMetaDataWriteBack      := True
-          needCurrentEntryWriteBack  := True
-          needPrevEntryWriteBack     := True
+          needMetaDataWriteBack      := True // new header + new BF
+          needCurrentEntryWriteBack  := True // new entry
+          needPrevEntryWriteBack     := False // insert in posi 0, no prev entry
 
           /* no 0 in the idx, 0 == invalid
             need fire & (!(io.mallocIdx.payload === U(0)))
-            but we move the 0-detection to outer lookupEngine module
+            but we move the 0-detection to the outer lookupEngine module
           */
           when(io.mallocIdx.fire){
             mallocDone := True
@@ -385,20 +440,31 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
             currentEntry.SHA3Hash := instr.SHA3Hash
             currentEntry.RefCount := 1
             currentEntry.SSDLBA   := newIdx
-            currentEntry.next     := 0
+            currentEntry.next     := bucketMetaData.head
             currentEntryIdx       := newIdx
             currentEntryValid     := True
+
+            bucketMetaData.head   := newIdx
+            if (htConf.bfEnable) {
+              when(bloomFilterLookupRes){
+                // BF says it's inside, but it's not -> FP and reconstruct BF
+                bucketMetaData.bloomFilter := (reconstructedBloomFilter | rBFLookupMaskReduced)
+              }.otherwise{
+                // BF says it's not inside -> normal insertion
+                bucketMetaData.bloomFilter := (bucketMetaData.bloomFilter | rBFLookupMaskReduced)
+              }
+            }
             // update old entry
-            prevEntry.SHA3Hash    := currentEntry.SHA3Hash
-            prevEntry.RefCount    := currentEntry.RefCount
-            prevEntry.SSDLBA      := currentEntry.SSDLBA
-            prevEntry.next        := newIdx
-            prevEntryIdx          := currentEntryIdx
-            prevEntryValid        := currentEntryValid
+            // prevEntry.SHA3Hash    := currentEntry.SHA3Hash
+            // prevEntry.RefCount    := currentEntry.RefCount
+            // prevEntry.SSDLBA      := currentEntry.SSDLBA
+            // prevEntry.next        := newIdx
+            // prevEntryIdx          := currentEntryIdx
+            // prevEntryValid        := currentEntryValid
             // update metadata: if empty, change head
-            bucketMetaData.head    := resIsEmptyBucket ? newIdx | bucketMetaData.head
-            bucketMetaData.tail    := newIdx
-            bucketMetaData.len     := bucketMetaData.len + 1
+            // bucketMetaData.head    := resIsEmptyBucket ? newIdx | bucketMetaData.head
+            // bucketMetaData.tail    := newIdx
+            // bucketMetaData.len     := bucketMetaData.len + 1
             goto(WRITE_BACK)
           }
         }
@@ -419,7 +485,8 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
             io.freeIdx.payload   := currentEntryIdx
 
             // update metadata and prevpage, current page is deleted
-            needMetaDataWriteBack     := True
+            val resIsFirstElement = (!prevEntryValid) & (currentEntryValid)
+            needMetaDataWriteBack     := resIsFirstElement
             needCurrentEntryWriteBack := False
             needPrevEntryWriteBack    := True
 
@@ -439,8 +506,11 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
               prevEntryIdx          := prevEntryIdx
               // update metadata: if empty, change head
               bucketMetaData.head    := (resIsFirstElement) ? nextEntryIdx | bucketMetaData.head
-              bucketMetaData.tail    := (currentEntryIdx === bucketMetaData.tail) ? (prevEntryValid ? prevEntryIdx | U(0)) | bucketMetaData.tail
-              bucketMetaData.len     := (bucketMetaData.len > 0) ? (bucketMetaData.len - 1) | U(0)
+              if (htConf.bfEnable) {
+                bucketMetaData.bloomFilter := bucketMetaData.bloomFilter
+              }
+              // bucketMetaData.tail    := (currentEntryIdx === bucketMetaData.tail) ? (prevEntryValid ? prevEntryIdx | U(0)) | bucketMetaData.tail
+              // bucketMetaData.len     := (bucketMetaData.len > 0) ? (bucketMetaData.len - 1) | U(0)
 
               goto(WRITE_BACK)
             }

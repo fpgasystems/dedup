@@ -27,9 +27,6 @@ case class MemManagerConfig (htConf: HashTableConfig) {
 
 case class MemManagerIO(htConf: HashTableConfig) extends Bundle {
   val axiConf     = Axi4ConfigAlveo.u55cHBM
-  // init signals
-  val initEn      = in Bool () 
-  // val initDone    = out Bool ()
   // interface to other units
   val mallocIdx   = master Stream(UInt(htConf.ptrWidth bits))
   val freeIdx     = slave Stream(UInt(htConf.ptrWidth bits))
@@ -55,13 +52,13 @@ case class MemManager(htConf: HashTableConfig) extends Component {
 
   // on-chip buffer for free-up idx
   val idxBuffer = StreamFifo(UInt(htConf.ptrWidth bits), idxBufferDepth)
-  idxBuffer.io.flush := io.initEn
+  // idxBuffer.io.flush := io.initEn
 
   val idxBufferNeedPop = (idxBuffer.io.occupancy > idxBufferThr)
 
   // off-chip index bank in AXI mem
   val idxBank = AxiFifo(conf)
-  idxBank.io.flush  := io.initEn
+  // idxBank.io.flush  := io.initEn
   idxBank.io.axiMem >> io.axiMem
 
   // counter for unreleased idx
@@ -108,19 +105,19 @@ case class MemManager(htConf: HashTableConfig) extends Component {
       idxBufferPortSelectLocked := idxBufferPortSelectRouted
     }
 
-    when(io.initEn){
-      locked := False
-      idxBufferPortSelectLocked := 0
-      cntIdxToAxi.clear()
-    }
+    // when(io.initEn){
+    //   locked := False
+    //   idxBufferPortSelectLocked := 0
+    //   cntIdxToAxi.clear()
+    // }
   }
   
   io.mallocIdx << StreamArbiterFactory.lowerFirst.transactionLock.onArgs(demuxIdxBufferPop(0), idxBank.io.pop, idxReleaseStreamCut)
 
-  when(io.initEn){
-    idxCounter.clear()
-    idxAllReleased := False
-  }
+  // when(io.initEn){
+  //   idxCounter.clear()
+  //   idxAllReleased := False
+  // }
 
   io.freeIdx >> idxBuffer.io.push
   idxReleaseStream >> idxReleaseStreamCut

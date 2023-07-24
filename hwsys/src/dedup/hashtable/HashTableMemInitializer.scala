@@ -22,7 +22,7 @@ case class HashTableMemInitializer (htConf: HashTableConfig) extends Component {
   val io = HashTableMemInitializerIO(htConf)
 
   /* config*/
-  val burstLen = if (htConf.bucketMetaDataType.getBitsWidth == 128){
+  val burstLen:BigInt = if (htConf.bucketMetaDataType.getBitsWidth == 128){
       if((htConf.nBucket/8) < 32) (htConf.nBucket/8) else 32 // number of 512b data transfer per request, for 128b metadata
     } else{
       if((htConf.nBucket/2) < 32) (htConf.nBucket/2) else 32 // number of 512b data transfer per request, for 512b metadata
