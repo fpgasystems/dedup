@@ -45,7 +45,7 @@ class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component {
   slowBufferGrp.zipWithIndex.foreach { case (e, i) =>
     val f = sizeSlowBufferGrp/sizeFastBufferGrp
     /** send page fragment to slowBuffer following the page order  */
-    e.io.push << slowBufferDistr(i%sizeFastBufferGrp).io.strmO(i*f/sizeSlowBufferGrp)
+    e.io.push << slowBufferDistr(i%sizeFastBufferGrp).io.strmO(i*f/sizeSlowBufferGrp).pipelined(StreamPipe.FULL)
   }
   slowBufferGrp.foreach(_.io.flush := io.initEn)
 

@@ -112,7 +112,7 @@ case class MemManager(htConf: HashTableConfig) extends Component {
     // }
   }
   
-  io.mallocIdx << StreamArbiterFactory.lowerFirst.transactionLock.onArgs(demuxIdxBufferPop(0), idxBank.io.pop, idxReleaseStreamCut)
+  io.mallocIdx << StreamArbiterFactory.lowerFirst.transactionLock.onArgs(demuxIdxBufferPop(0).pipelined(StreamPipe.FULL), idxBank.io.pop.pipelined(StreamPipe.FULL), idxReleaseStreamCut.pipelined(StreamPipe.FULL))
 
   // when(io.initEn){
   //   idxCounter.clear()
