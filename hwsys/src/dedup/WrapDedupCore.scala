@@ -46,10 +46,10 @@ case class DedupConfig() {
   val sha3Conf = SHA3Config(dataWidth = 512, sha3Type = SHA3_256, groupSize = 64)
 
   // 8192x4 bucket x 8 entry/bucket = 1<<18 hash table
-  val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = (BigInt(1) << 18), expBucketSize = 8, hashTableOffset = (BigInt(1) << 30), bfEnable = true)
+  val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = (BigInt(1) << 18), expBucketSize = 8, hashTableOffset = (BigInt(1) << 30), bfEnable = false)
 
   // 1 << 27 = 8Gib/64B, for real system:
-  // val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = ((BigInt(1) << 27) + (BigInt(1) << 26)), expBucketSize = 8, hashTableOffset = (BigInt(1) << 30))
+  // val htConf = HashTableConfig (hashValWidth = 256, ptrWidth = 32, hashTableSize = (BigInt(1) << 27), expBucketSize = 8, hashTableOffset = (BigInt(1) << 30), bfEnable = false)
 
   val pwConf = PageWriterConfig()
 }

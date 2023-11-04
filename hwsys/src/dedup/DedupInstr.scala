@@ -28,7 +28,7 @@ case class WRITE2FREEInstr (conf: DedupConfig) extends Bundle{
 
 case class ERASEREFInstr (conf: DedupConfig) extends Bundle{
   val SHA3Hash = Bits(256 bits)
-  val CRCHash = Vec(Bits(32 bits), 3)
+  val CRCHash = Vec(Bits(32 bits), 3) // this CRC is a legacy field, it is NOT used in ANY part of the code(except the deprecated ones)
   val opCode = DedupCoreOp()
 
   def decodeFromRawBits() : (ERASEREFInstr, Bits) => Unit = {
@@ -41,14 +41,12 @@ case class ERASEREFInstr (conf: DedupConfig) extends Bundle{
 }
 
 case class READSSDInstr (conf: DedupConfig) extends Bundle{
-  val SSDLBALen = UInt(conf.LBAWidth bits)
-  val SSDLBAStart = UInt(conf.LBAWidth bits)
+  val SHA3Hash = Bits(256 bits)
   val opCode = DedupCoreOp()
 
   def decodeFromRawBits() : (READSSDInstr, Bits) => Unit = {
     (decoded, raw) => {
-      decoded.SSDLBALen    assignFromBits raw(0, conf.LBAWidth bits)
-      decoded.SSDLBAStart  assignFromBits raw(conf.LBAWidth, conf.LBAWidth bits)
+      decoded.SHA3Hash     :=             raw(0, 256 bits)
       decoded.opCode       assignFromBits raw((conf.instrTotalWidth - 1) downto (conf.instrTotalWidth - DedupCoreOp().getBitsWidth))
     }
   }

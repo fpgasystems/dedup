@@ -12,13 +12,13 @@ object  SimInstrHelpers {
   val conf = DedupConfig()
   val instrBitWidth = DedupCoreOp().getBitsWidth
 
-  def randInstrGen(instrIdx : Int, printRes : Boolean = false) : BigInt = instrIdx match{
-    case 0 => nopGen(printRes)
-    case 1 => writeInstrGen(1 + Random.nextInt(32).abs, 1 + Random.nextInt(32).abs, printRes)
-    case 2 => eraseInstrGen(1 + Random.nextInt(32).abs, 1 + Random.nextInt(32).abs, printRes)
-    case 3 => readInstrGen (1 + Random.nextInt(32).abs, 1 + Random.nextInt(32).abs, printRes)
-    case _ => readInstrGen (1 + Random.nextInt(32).abs, 1 + Random.nextInt(32).abs, printRes)
-  }
+  // def randInstrGen(instrIdx : Int, printRes : Boolean = false) : BigInt = instrIdx match{
+  //   case 0 => nopGen(printRes)
+  //   case 1 => writeInstrGen(1 + Random.nextInt(32).abs, 1 + Random.nextInt(32).abs, printRes)
+  //   case 2 => eraseInstrGen(1 + Random.nextInt(32).abs, 1 + Random.nextInt(32).abs, printRes)
+  //   case 3 => readInstrGen (1 + Random.nextInt(32).abs, 1 + Random.nextInt(32).abs, printRes)
+  //   case _ => readInstrGen (1 + Random.nextInt(32).abs, 1 + Random.nextInt(32).abs, printRes)
+  // }
   
   // generate 512 bit representation of instruction
   def nopGen(printRes : Boolean = false) : BigInt = {
@@ -54,16 +54,14 @@ object  SimInstrHelpers {
     rawInstr
   }
 
-  def readInstrGen(start:BigInt, len:BigInt, printRes : Boolean = false) : BigInt = {
-    val start_trunc = SimHelpers.bigIntTruncVal(start, conf.LBAWidth - 1, 0)
-    val len_trunc   = SimHelpers.bigIntTruncVal(len  , conf.LBAWidth - 1, 0)
+  def readInstrGen(sha3:BigInt, printRes : Boolean = false) : BigInt = {
+    val sha3_trunc = SimHelpers.bigIntTruncVal(sha3, 255, 0)
     if (printRes){
-      println(s"[READ] opcode = 3, start=$start_trunc, len=$len_trunc")
+      println(s"[READ] opcode = 3, sha3=$sha3")
     }
     var rawInstr = BigInt(0)
     rawInstr = rawInstr + (BigInt(3) << (conf.instrTotalWidth - instrBitWidth))
-    rawInstr = rawInstr + (start_trunc << conf.LBAWidth)
-    rawInstr = rawInstr + (len_trunc << 0)
+    rawInstr = rawInstr + (sha3 << 0)
     rawInstr
   }
 

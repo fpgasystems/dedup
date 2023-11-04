@@ -170,6 +170,8 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
         storageInstr.opCode := (fullInstr.RefCount === 1) ? SSDOp.WRITE | SSDOp.UPDATEHEADER
       }.elsewhen(fullInstr.opCode === DedupCoreOp.ERASEREF){
         storageInstr.opCode := (fullInstr.RefCount === 0) ? SSDOp.ERASE | SSDOp.UPDATEHEADER
+      }.elsewhen(fullInstr.opCode === DedupCoreOp.READSSD){
+        storageInstr.opCode := SSDOp.READ
       }.otherwise{
         storageInstr.opCode := SSDOp.READ
       }
@@ -191,6 +193,8 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
         resp.isExec := (fullInstr.RefCount === 1) ? True | False
       }.elsewhen(fullInstr.opCode === DedupCoreOp.ERASEREF){
        resp.isExec := (fullInstr.RefCount === 0) ? True | False
+      }.elsewhen(fullInstr.opCode === DedupCoreOp.READSSD){
+       resp.isExec := True
       }.otherwise{
         resp.isExec := True
       }

@@ -516,6 +516,20 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
             }
           }
         }.otherwise{
+          // TODO: add raise exception
+          goto(WRITE_BACK)
+        }
+      }.elsewhen(instr.opCode === DedupCoreOp.READSSD){
+        // read
+        when(lookupIsExist){
+          // no update on ref counter
+          // no update on entries
+          needMetaDataWriteBack      := False
+          needCurrentEntryWriteBack  := False
+          needPrevEntryWriteBack     := False
+          goto(WRITE_BACK)
+        }.otherwise{
+          // TODO: add raise exception
           goto(WRITE_BACK)
         }
       }

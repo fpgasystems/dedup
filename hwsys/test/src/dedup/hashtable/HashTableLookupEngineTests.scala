@@ -147,6 +147,39 @@ object HashTableLookupEngineSim {
     instrStrmPush.join()
     resWatch.join()
 
+    // Test part 1.5: read all
+    val goldenResponse1p5: ListBuffer[execRes] = ListBuffer()
+    val instrStrmData1p5: ListBuffer[BigInt] = ListBuffer()
+
+    // 1,...,N, 1,...,N
+    for (i <- 0 until uniqueSHA3refCount) {
+      for (j <- 0 until numUniqueSHA3) {
+        instrStrmData1p5.append(HashTableLookupHelpers.readInstrGen(uniqueSHA3(j)))
+        goldenResponse1p5.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),3))
+      }
+    }
+
+    /* Stimuli injection */
+    val instrStrmPush1p5 = fork {
+      for (instrIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        dut.io.instrStrmIn.sendData(dut.clockDomain, instrStrmData1p5(instrIdx))
+      }
+    }
+
+    /* Res watch*/
+    val resWatch1p5 = fork {
+      for (respIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        val respData = dut.io.res.recvData(dut.clockDomain)
+        val decodedRealOutput = HashTableLookupHelpers.decodeRes(respData)
+        assert(decodedRealOutput.SHA3Hash == goldenResponse1p5(respIdx).SHA3Hash)
+        assert(decodedRealOutput.RefCount == goldenResponse1p5(respIdx).RefCount)
+        assert(decodedRealOutput.opCode   == goldenResponse1p5(respIdx).opCode)
+      }
+    }
+
+    instrStrmPush1p5.join()
+    resWatch1p5.join()
+
     // Test part 2: delete all
     val goldenResponse2: ListBuffer[execRes] = ListBuffer()
     val instrStrmData2: ListBuffer[BigInt] = ListBuffer()

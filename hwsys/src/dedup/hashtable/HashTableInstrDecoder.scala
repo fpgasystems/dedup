@@ -66,10 +66,14 @@ case class HashTableInstrDecoder(conf: DedupConfig) extends Component{
           io.waitingInstrStream.setIdle()
         }
         is(DedupCoreOp.READSSD.asBits){
-          // Throw
-          isNeededInstr := False
-          io.rawInstrStream.ready := True
-          io.readyInstrStream.setIdle()
+          // go to readyInstrStream
+          isNeededInstr := True
+          io.readyInstrStream.translateFrom(io.rawInstrStream){ (decodedInstr, rawBits) =>
+            val decodedFullInstr = READSSDInstr(conf)
+            READSSDInstr(conf).decodeFromRawBits()(decodedFullInstr, rawBits)
+            decodedInstr.assignSomeByName(decodedFullInstr)
+            decodedInstr.tag     := tagGenerator.value
+          }
           io.waitingInstrStream.setIdle()
         }
         default{

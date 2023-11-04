@@ -67,15 +67,26 @@ case class PageWriterInstrDecoder(conf: DedupConfig) extends Component{
           io.readyInstrStream.setIdle()
         }
         is(DedupCoreOp.READSSD.asBits){
-          // go to readyInstrStream
+          // // go to readyInstrStream
+          // isNeededInstr := True
+          // io.readyInstrStream.translateFrom(io.rawInstrStream){ (decodedInstr, rawBits) =>
+          //   val decodedFullInstr = READSSDInstr(conf)
+          //   READSSDInstr(conf).decodeFromRawBits()(decodedFullInstr, rawBits)
+          //   decodedInstr.assignSomeByName(decodedFullInstr)
+          //   decodedInstr.tag          := tagGenerator.value
+          // }
+          // io.waitingInstrStream.setIdle()
+          // go to waitInstrStream
           isNeededInstr := True
-          io.readyInstrStream.translateFrom(io.rawInstrStream){ (decodedInstr, rawBits) =>
+          io.waitingInstrStream.translateFrom(io.rawInstrStream){ (decodedInstr, rawBits) =>
             val decodedFullInstr = READSSDInstr(conf)
             READSSDInstr(conf).decodeFromRawBits()(decodedFullInstr, rawBits)
-            decodedInstr.assignSomeByName(decodedFullInstr)
+            decodedInstr.hostLBALen   := 1
+            decodedInstr.hostLBAStart := 0
+            decodedInstr.opCode       := decodedFullInstr.opCode
             decodedInstr.tag          := tagGenerator.value
           }
-          io.waitingInstrStream.setIdle()
+          io.readyInstrStream.setIdle()
         }
         default{
           // Throw

@@ -32,7 +32,7 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
   val cmdQDepth = 4
   
   // lookup engine settings
-  val sizeFSMArray = 6
+  val sizeFSMArray = 8
 
   // bloom filter config
   val mWidth = 5

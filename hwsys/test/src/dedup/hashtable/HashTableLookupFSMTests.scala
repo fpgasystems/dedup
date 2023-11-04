@@ -152,6 +152,42 @@ object HashTableFSMTBSim {
     pseudoMallocIdxPush.join()
     resWatch.join()
 
+    // Test part 1.5: read all
+    val goldenResponse1p5: ListBuffer[execRes] = ListBuffer()
+    val instrStrmData1p5: ListBuffer[BigInt] = ListBuffer()
+
+    // var pgStrmData: ListBuffer[BigInt] = ListBuffer()
+
+    // 1,...,N, 1,...,N
+    for (i <- 0 until uniqueSHA3refCount) {
+      for (j <- 0 until numUniqueSHA3) {
+        instrStrmData1p5.append(HashTableLookupHelpers.readInstrGen(uniqueSHA3(j)))
+        goldenResponse1p5.append(execRes(uniqueSHA3(j),goldenHashTableRefCountLayout(j),goldenHashTableSSDLBALayout(j),3))
+      }
+    }
+
+    /* Stimuli injection */
+    val instrStrmPush1p5 = fork {
+      for (instrIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        dut.io.instrStrmIn.sendData(dut.clockDomain, instrStrmData1p5(instrIdx))
+      }
+    }
+
+    dut.io.mallocIdx.valid   #= false
+    dut.io.freeIdx.ready     #= false
+
+    /* Res watch*/
+    val resWatch1p5 = fork {
+      for (respIdx <- 0 until (uniqueSHA3refCount * numUniqueSHA3)) {
+        val respData = dut.io.res.recvData(dut.clockDomain)
+        val decodedRealOutput = HashTableLookupHelpers.decodeRes(respData)
+        assert(decodedRealOutput == goldenResponse1p5(respIdx))
+      }
+    }
+
+    instrStrmPush1p5.join()
+    resWatch1p5.join()
+
     // Test part 2: delete all
     val goldenResponse2: ListBuffer[execRes] = ListBuffer()
     val instrStrmData2: ListBuffer[BigInt] = ListBuffer()
@@ -255,6 +291,16 @@ object HashTableLookupHelpers{
   def eraseInstrGen(SHA3 : BigInt) : BigInt = {
     val sha3_trunc = SimHelpers.bigIntTruncVal(SHA3, 255, 0)
     val opCode = BigInt(2)
+
+    var lookupInstr = BigInt(0)
+    lookupInstr = lookupInstr + (opCode << (HashTableLookupFSMInstr(htConf).getBitsWidth - DedupCoreOp().getBitsWidth))
+    lookupInstr = lookupInstr + (sha3_trunc << 0)
+    lookupInstr
+  }
+
+  def readInstrGen(SHA3 : BigInt) : BigInt = {
+    val sha3_trunc = SimHelpers.bigIntTruncVal(SHA3, 255, 0)
+    val opCode = BigInt(3)
 
     var lookupInstr = BigInt(0)
     lookupInstr = lookupInstr + (opCode << (HashTableLookupFSMInstr(htConf).getBitsWidth - DedupCoreOp().getBitsWidth))
