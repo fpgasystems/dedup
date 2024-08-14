@@ -1,9 +1,12 @@
-package dedup
+package dedup.deprecated
 
 import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
 import spinal.crypto.checksum._
+
+import dedup.bloomfilter.CRC32
+import dedup.bloomfilter.CRCModule
 
 import scala.collection.mutable.ArrayBuffer
 

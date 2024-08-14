@@ -1,4 +1,4 @@
-package dedup
+package dedup.deprecated
 
 import spinal.core.Component.push
 import spinal.core._

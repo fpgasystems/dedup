@@ -1,9 +1,11 @@
-package dedup
+package dedup.deprecated
 
 import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
 import spinal.lib.bus.amba4.axi._
+
+import dedup.Axi4ConfigAlveo
 
 object HashTabVerb extends SpinalEnum {
   val INSERT, LOOKUP = newElement()

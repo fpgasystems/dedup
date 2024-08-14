@@ -3,6 +3,7 @@ package util
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axilite._
+import spinal.lib.bus.amba4.axi._
 
 /** Implicit helpers */
 object Helpers {
@@ -119,6 +120,18 @@ object Helpers {
   //  implicit class RegUtils(value: BaseType) {
   //    def inc()
   //  }
+
+  implicit class AxiUtils(thisAxiIntf : Axi4){
+    def continueWhen(cond: Bool): Axi4 = {
+      val nextAxiIntf = new Axi4(thisAxiIntf.config)
+      thisAxiIntf.aw.continueWhen(cond) >> nextAxiIntf.aw
+      thisAxiIntf.w .continueWhen(cond) >> nextAxiIntf.w 
+      thisAxiIntf.ar.continueWhen(cond) >> nextAxiIntf.ar
+      thisAxiIntf.b << nextAxiIntf.b.continueWhen(cond)
+      thisAxiIntf.r << nextAxiIntf.r.continueWhen(cond)
+      return nextAxiIntf
+    }
+  }
 
 }
 

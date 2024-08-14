@@ -27,8 +27,10 @@ class HostIntfIO(axiConf: Axi4Config) extends Bundle {
   val pgStrm = master Stream(Bits(512 bits))
 
   // resp stream
-  val pgResp = slave Stream(Bits(128 bits))
+  val pgResp = slave Stream(Bits(512 bits))
 
+  // flush Queue
+  val initEn = in Bool()
 
   def regMap(r: AxiLite4SlaveFactory, baseR: Int): Int = {
     implicit val baseReg = baseR
@@ -101,9 +103,11 @@ class HostIntf() extends Component {
   /** write path */
 
   val pgRespQWide = StreamFifo(Bits(512 bits), 512)
-  pgRespQWide.io.push.translateFrom(io.pgResp.slowdown(4)) (_ := _.asBits)
+  pgRespQWide.io.push << io.pgResp
+  pgRespQWide.io.flush := io.initEn
+  // pgRespQWide.io.push.translateFrom(io.pgResp.slowdown(4)) (_ := _.asBits)
 
-  val wrReqBatchSize = 256 // batch resp of 16 pages, each page resp is 128b (16B)
+  val wrReqBatchSize = 1024 // batch resp of 16 pages, each page resp is 512b (64B)
   bpss_wr_req.vaddr := wrAddr.resized
   bpss_wr_req.len := wrReqBatchSize
   bpss_wr_req.stream := False
@@ -115,6 +119,7 @@ class HostIntf() extends Component {
   bpss_wr_req.vfid := 0
   bpss_wr_req.rsrvd := 0
   io.hostd.bpss_wr_req.data.assignFromBits(bpss_wr_req.asBits)
+  // Batch size in word(64B)
   val cntWordToSend = AccumIncDec(16 bits, io.hostd.bpss_wr_req.fire, io.hostd.axis_host_src.fire, wrReqBatchSize / 64, 1)
   io.hostd.bpss_wr_req.valid := (pgRespQWide.io.occupancy - cntWordToSend.accum).asSInt >= (wrReqBatchSize / 64)
   when(io.hostd.bpss_wr_req.fire) {
