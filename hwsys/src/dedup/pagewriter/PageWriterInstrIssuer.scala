@@ -3,7 +3,7 @@ package pagewriter
 
 import spinal.core._
 import spinal.lib._
-import hashtable.HashTableLookupFSMRes
+import registerfile.HashTableLookupRes
 
 case class PageWriterInstrIssuer(conf: DedupConfig) extends Component{
 
@@ -15,7 +15,7 @@ case class PageWriterInstrIssuer(conf: DedupConfig) extends Component{
     /* input instr stream */
     val readyInstrStream   = slave Stream (DecodedReadyInstr(conf)) 
     val waitingInstrStream = slave Stream (DecodedWaitingInstr(conf))
-    val lookupResStream    = slave Stream (HashTableLookupFSMRes(conf.htConf))
+    val lookupResStream    = slave Stream (HashTableLookupRes(conf))
 
     /* output FSM instr stream */
     val instrIssueStream = master Stream (CombinedFullInstr(conf))
@@ -36,14 +36,16 @@ case class PageWriterInstrIssuer(conf: DedupConfig) extends Component{
     val fire  = Bool() default (False)
 
     // slicing: slice instruction with pagecount = 10 to 10x instr on one page 
-    val slicingCounter = Counter(conf.LBAWidth bits)
+    val slicingCounter = Counter(conf.lbaWidth bits)
 
     // payload assignment
     payload.SHA3Hash     := io.lookupResStream.payload.SHA3Hash
     payload.RefCount     := io.lookupResStream.payload.RefCount
     payload.SSDLBA       := io.lookupResStream.payload.SSDLBA
+    payload.nodeIdx      := io.lookupResStream.payload.nodeIdx
     payload.hostLBAStart := io.waitingInstrStream.hostLBAStart + slicingCounter
     payload.hostLBALen   := 1  // sliced
+    payload.hostDataNodeIdx := io.waitingInstrStream.hostDataNodeIdx
     payload.opCode       := io.lookupResStream.payload.opCode
     payload.tag          := io.waitingInstrStream.tag
 
@@ -93,6 +95,8 @@ case class PageWriterInstrIssuer(conf: DedupConfig) extends Component{
       io.instrIssueStream.payload.SHA3Hash     := 0
       io.instrIssueStream.payload.RefCount     := 0
       io.instrIssueStream.payload.SSDLBA       := io.readyInstrStream.SSDLBAStart
+      io.instrIssueStream.payload.nodeIdx      := 0
+      io.instrIssueStream.payload.hostDataNodeIdx := io.readyInstrStream.SSDNodeIdx
       io.instrIssueStream.payload.hostLBAStart := 0
       io.instrIssueStream.payload.hostLBALen   := io.readyInstrStream.SSDLBALen
       io.instrIssueStream.payload.opCode       := io.readyInstrStream.opCode

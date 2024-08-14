@@ -1,4 +1,4 @@
-package dedup
+package dedup.fingerprint
 
 import spinal.core._
 import spinal.lib._
@@ -17,7 +17,7 @@ case class SHA3GroupIO(conf: SHA3Config) extends Bundle {
   val res      = master Stream (Bits(conf.resWidth bits))
 }
 
-class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component { 
+case class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component { 
   val io = SHA3GroupIO(sha3Conf)
 
   val sizeFastBufferGrp = 16
@@ -27,8 +27,8 @@ class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component {
   /** Fast buffer WxDxN: 512bx512x16(sizeFastBufferGrp) */
   val fastBufferGrp = Array.fill(sizeFastBufferGrp)(StreamFifo(Fragment(Bits(512 bits)), 512))
   val fastBufferDistr = FrgmDistributor(sizeFastBufferGrp, 1, Bits(512 bits))
-  fastBufferDistr.io.strmI << io.frgmIn
-  (fastBufferGrp, fastBufferDistr.io.strmO).zipped.foreach(_.io.push << _)
+  fastBufferDistr.io.strmI << io.frgmIn.pipelined(StreamPipe.FULL)
+  (fastBufferGrp, fastBufferDistr.io.strmO).zipped.foreach(_.io.push << _.pipelined(StreamPipe.FULL))
   fastBufferGrp.foreach(_.io.flush := io.initEn) // flush all fast buffer
 
   /** stream frgm adapter 512 -> 32 */
@@ -40,7 +40,7 @@ class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component {
   /** Slow buffer WxDxN: 32bx1024x64(sizeSlowBufferGrp) */
   val slowBufferGrp = Array.fill(sizeSlowBufferGrp)(StreamFifo(Fragment(Bits(32 bits)), 1024))
   val slowBufferDistr = Array.fill(sizeFastBufferGrp)(FrgmDistributor(sizeSlowBufferGrp / sizeFastBufferGrp, 1, Bits(32 bits)))
-  (slowBufferDistr, slowBufferAdptStrm).zipped.foreach(_.io.strmI << _)
+  (slowBufferDistr, slowBufferAdptStrm).zipped.foreach(_.io.strmI << _.pipelined(StreamPipe.FULL))
 
   slowBufferGrp.zipWithIndex.foreach { case (e, i) =>
     val f = sizeSlowBufferGrp/sizeFastBufferGrp
@@ -50,7 +50,7 @@ class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component {
   slowBufferGrp.foreach(_.io.flush := io.initEn)
 
   /** SHA3 cores */
-  val sha3CoreGrp = Array.fill(sizeSlowBufferGrp)(new SHA3CoreWrap(SHA3_256))
+  val sha3CoreGrp = Array.fill(sizeSlowBufferGrp)(SHA3CoreWrap(SHA3_256))
 
   sha3CoreGrp.foreach(_.io.initEn := io.initEn)
   sha3CoreGrp.zipWithIndex.foreach { case (e, i) =>
@@ -62,8 +62,25 @@ class SHA3Group(sha3Conf : SHA3Config = SHA3Config()) extends Component {
   }
 
   /** Arbiter the results */
-  val cntSel = Counter(sizeSlowBufferGrp, io.res.fire)
-  io.res.translateFrom(StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp.pipelined(StreamPipe.FULL))))(_ := _.digest)
+  // 1 stage impl: -1.5ns slack on > 10 nets
+  // val cntSel = Counter(sizeSlowBufferGrp, io.res.fire)
+  // io.res.translateFrom(StreamMux(cntSel, sha3CoreGrp.map(_.io.rsp.pipelined(StreamPipe.FULL).pipelined(StreamPipe.FULL))))(_ := _.digest)
+
+  // 2 stage impl for timing
+  val cntResOutGrpStage1 = 8 // 8 groups
+  val sizeResOutGrpStage1 = sizeSlowBufferGrp/cntResOutGrpStage1 // 8 per group
+  assert (sizeSlowBufferGrp % cntResOutGrpStage1 == 0)
+  val resStage1 = Vec(Stream(Bits(sha3Conf.resWidth bits)), cntResOutGrpStage1)
+  resStage1.zipWithIndex.foreach{ case (groupRes, groupIdx) =>
+    val startIdx = groupIdx * sizeResOutGrpStage1
+    val endIdx = startIdx + sizeResOutGrpStage1
+    val cntSel = Counter(sizeResOutGrpStage1, groupRes.fire)
+    groupRes.translateFrom(StreamMux(cntSel, sha3CoreGrp.slice(startIdx, endIdx).map(_.io.rsp.pipelined(StreamPipe.FULL)))){_ := _.digest}
+  }
+
+  val cntFireStage2 = Counter(sizeResOutGrpStage1, io.res.fire)
+  val cntSel2 = Counter(cntResOutGrpStage1, cntFireStage2.willOverflow)
+  io.res.translateFrom(StreamMux(cntSel2, resStage1.map(_.pipelined(StreamPipe.FULL)))){_ := _}
 
   /** pipeline interface (initEn, cmd, res) of some SHA3Core to enable SLR allocation in implementation
    * Normall one SLR in u55c device can have 48 SHA3 cores
@@ -122,7 +139,7 @@ case class SHA3CoreWrapIO(conf: SHA3Config) extends Bundle {
 
 }
 
-class SHA3CoreWrap(sha3Type: SHA3_Type) extends Component {
+case class SHA3CoreWrap(sha3Type: SHA3_Type) extends Component {
   val sha3CoreConf = SHA3Config(32, sha3Type)
   val io = SHA3CoreWrapIO(sha3CoreConf)
 

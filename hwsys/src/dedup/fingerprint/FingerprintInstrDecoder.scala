@@ -1,5 +1,5 @@
 package dedup
-package hashtable
+package fingerprint
 
 import spinal.core._
 import spinal.lib._
@@ -11,12 +11,12 @@ case class DecodedReadyInstr(conf: DedupConfig) extends Bundle{
 }
 
 case class DecodedWaitingInstr(conf: DedupConfig) extends Bundle{
-  val pageCount = UInt(conf.LBAWidth bits)
+  val pageCount = UInt(conf.lbaWidth bits)
   val opCode = DedupCoreOp()
   val tag = UInt(conf.htConf.instrTagWidth bits)
 }
 
-case class HashTableInstrDecoder(conf: DedupConfig) extends Component{
+case class FingerprintInstrDecoder(conf: DedupConfig) extends Component{
 
   val instrBitWidth = DedupCoreOp().getBitsWidth
   val htConf = conf.htConf

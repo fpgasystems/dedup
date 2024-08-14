@@ -5,26 +5,18 @@ import spinal.core.Component.push
 import spinal.core._
 import spinal.lib._
 
-import hashtable.HashTableLookupFSMRes
-// import spinal.lib.fsm._
-// import spinal.lib.bus.amba4.axi._
+import registerfile.HashTableLookupRes
 import util.{CntDynmicBound, FrgmDemux}
 
-case class PageWriterConfig(dataWidth: Int = 512) {
-  // Instr Decoder
-  val readyQueueLogDepth = 8
-  val waitingQueueLogDepth = 8
+case class PageWriterConfig(readyQueueLogDepth : Int = 2,
+                            waitingQueueLogDepth : Int = 8,
+                            // old impl: 8192 x 2
+                            // 128 x 64 fragment = 8192 = 1 << 13 ~ SHA3 latency x2
+                            // + network latency + margin: (1 << 13) x 4 = 1 << 15
+                            pageFrgmQueueLogDepth : Int = 15,
+                            pageFrgmQueueCount : Int = 4) {
   val instrTagWidth = if (readyQueueLogDepth > waitingQueueLogDepth) (readyQueueLogDepth + 1) else (waitingQueueLogDepth + 1)
-
-  // val pgIdxWidth = 32
-  // val pgByteSize = 4096
-  // val pgAddBitShift = log2Up(pgByteSize)
-  // val pgWordCnt = pgByteSize / (dataWidth/8)
-
-  // val pgIdxFifoSize = 256 // no fence on this stream flow, always assume there's enough space in idxFifo
-  // val pgBufSize = 64 * pgWordCnt
-
-  // val frgmType = Bits(dataWidth bits)
+  assert(pageFrgmQueueCount >= 1)
 }
 
 object SSDOp extends SpinalEnum(binarySequential) {
@@ -38,33 +30,43 @@ object SSDOp extends SpinalEnum(binarySequential) {
 
 case class CombinedFullInstr (conf: DedupConfig) extends Bundle {
   // contain all info for Resp and SSD, and also tag for arbitration
-  val SHA3Hash     = Bits(conf.htConf.hashValWidth bits)
-  val RefCount     = UInt(conf.htConf.ptrWidth bits)
-  val SSDLBA       = UInt(conf.htConf.ptrWidth bits)
-  val hostLBAStart = UInt(conf.htConf.ptrWidth bits)
-  val hostLBALen   = UInt(conf.htConf.ptrWidth bits)
-  val opCode       = DedupCoreOp()
-  val tag          = UInt(conf.pwConf.instrTagWidth bits)
+  val SHA3Hash        = Bits(conf.htConf.hashValWidth bits)
+  val RefCount        = UInt(conf.lbaWidth bits)
+  // fpga store position
+  val SSDLBA          = UInt(conf.lbaWidth bits)
+  val nodeIdx         = UInt(conf.nodeIdxWidth bits)
+  // original instr
+  val hostLBAStart    = UInt(conf.lbaWidth bits)
+  val hostLBALen      = UInt(conf.lbaWidth bits)
+  val hostDataNodeIdx = UInt(conf.dataNodeIdxWidth bits)
+  val opCode          = DedupCoreOp()
+  val tag             = UInt(conf.pwConf.instrTagWidth bits)
 }
 
 case class PageWriterResp (conf: DedupConfig) extends Bundle {
-  val SHA3Hash     = Bits(conf.htConf.hashValWidth bits)
-  val RefCount     = UInt(conf.htConf.ptrWidth bits)
-  val SSDLBA       = UInt(conf.htConf.ptrWidth bits)
-  val hostLBAStart = UInt(conf.htConf.ptrWidth bits)
-  val hostLBALen   = UInt(conf.htConf.ptrWidth bits)
+  val SHA3Hash        = Bits(conf.htConf.hashValWidth bits)
+  val RefCount        = UInt(conf.lbaWidth bits)
+  // fpga store position
+  val SSDLBA          = UInt(conf.lbaWidth bits)
+  val nodeIdx         = UInt(conf.nodeIdxWidth bits)
+  // original instr
+  val hostLBAStart    = UInt(conf.lbaWidth bits)
+  val hostLBALen      = UInt(conf.lbaWidth bits)
+  val hostDataNodeIdx = UInt(conf.dataNodeIdxWidth bits)
   // True means, new page(write exec), or GC (del exec), always True in read
-  val isExec       = Bool() 
-  val opCode       = DedupCoreOp()
+  val isExec          = Bool() 
+  val opCode          = DedupCoreOp()
 }
 
 case class SSDInstr (conf: DedupConfig) extends Bundle {
   // page header + operation, since header is small
   val SHA3Hash    = Bits(conf.htConf.hashValWidth bits)
-  val RefCount    = UInt(conf.htConf.ptrWidth bits)
-  val SSDLBAStart = UInt(conf.htConf.ptrWidth bits)
+  val RefCount    = UInt(conf.lbaWidth bits)
+  val SSDNodeIdx  = UInt(conf.dataNodeIdxWidth bits)
+  val SSDLBAStart = UInt(conf.lbaWidth bits)
   // in dedup, write/erase LBALen = 1, read LBALen = input LBALen
-  val SSDLBALen   = UInt(conf.htConf.ptrWidth bits)
+  val SSDLBALen   = UInt(conf.lbaWidth bits)
+  val nodeIdx     = UInt(conf.nodeIdxWidth bits)
   val opCode      = SSDOp()
 }
 
@@ -79,7 +81,7 @@ case class PageWriterSSIO(conf: DedupConfig) extends Bundle {
   val initEn       = in Bool ()
   val opStrmIn     = slave Stream (Bits(conf.instrTotalWidth bits))
   val pgStrmFrgmIn = slave Stream (Fragment(Bits(conf.wordSizeBit bits)))
-  val lookupRes    = slave Stream (HashTableLookupFSMRes(conf.htConf))
+  val lookupRes    = slave Stream (HashTableLookupRes(conf))
   val res          = master Stream (PageWriterResp(conf))
   /** mock SSD interface */
   /* all instr and datain go to sink, and there will be no resp for write/read/erase
@@ -91,38 +93,33 @@ case class PageWriterSSIO(conf: DedupConfig) extends Bundle {
   // val axiConf = Axi4ConfigAlveo.u55cHBM
   // val axiStore = master(Axi4(axiConf))
   /** bandwidth controller */
-  val factorThrou = in UInt(5 bits)
+  val factorThrou = in UInt(5 bits) // dummy for now
 }
 
-class PageWriterSubSystem(conf: DedupConfig) extends Component {
+case class PageWriterSubSystem(conf: DedupConfig) extends Component {
   val io     = PageWriterSSIO(conf)
 
   val pwConf = conf.pwConf
 
   /** queue here to avoid blocking the wrap pgIn, which is also forked to BF & SHA3 */
-  val frgmInBuffer1    = StreamFifo(Fragment(Bits(conf.wordSizeBit bits)), 8192) // 128 x 64 fragment = 8192
-  val frgmInBuffer2    = StreamFifo(Fragment(Bits(conf.wordSizeBit bits)), 8192) // 128 x 64 fragment = 8192
-  val lookupResBuffer = StreamFifo(HashTableLookupFSMRes(conf.htConf), 4)
+  val frgmInBufferArray = Array.tabulate(conf.pwConf.pageFrgmQueueCount){idx =>
+    StreamFifo(Fragment(Bits(conf.wordSizeBit bits)), 1 << (conf.pwConf.pageFrgmQueueLogDepth - log2Up(conf.pwConf.pageFrgmQueueCount)))}
+  val lookupResBuffer = StreamFifo(HashTableLookupRes(conf), 4)
 
-  frgmInBuffer1.io.push   << io.pgStrmFrgmIn.pipelined(StreamPipe.FULL)
-  frgmInBuffer2.io.push   << frgmInBuffer1.io.pop
-  lookupResBuffer.io.push << io.lookupRes.pipelined(StreamPipe.FULL)
+  io.pgStrmFrgmIn.pipelined(StreamPipe.FULL) >> frgmInBufferArray(0).io.push
+  if (conf.pwConf.pageFrgmQueueCount > 1){
+    for (idx <- 0 until conf.pwConf.pageFrgmQueueCount - 1){
+      frgmInBufferArray(idx).io.pop >> frgmInBufferArray(idx + 1).io.push
+    }
+  }
+  io.lookupRes.pipelined(StreamPipe.FULL)    >>  lookupResBuffer.io.push
 
-  frgmInBuffer1.io.flush   := io.initEn
-  frgmInBuffer2.io.flush   := io.initEn
-  lookupResBuffer.io.flush := io.initEn
-
-  val frgmInQ    = frgmInBuffer2.io.pop   
+  val frgmInQ    = frgmInBufferArray(conf.pwConf.pageFrgmQueueCount - 1).io.pop   
   val lookupResQ = lookupResBuffer.io.pop
 
-  val instrDecoder = PageWriterInstrDecoder(conf)
-
+  val instrDecoder             = PageWriterInstrDecoder(conf)
+  val decodedReadyInstrQueue   = StreamFifo(DecodedReadyInstr(conf), 1 << pwConf.readyQueueLogDepth)
   val decodedWaitingInstrQueue = StreamFifo(DecodedWaitingInstr(conf), 1 << pwConf.waitingQueueLogDepth)
-
-  val decodedReadyInstrQueue = StreamFifo(DecodedReadyInstr(conf), 1 << pwConf.readyQueueLogDepth)
-
-  decodedWaitingInstrQueue.io.flush := io.initEn
-  decodedReadyInstrQueue.io.flush   := io.initEn
 
   // decoder + decoded instr Queue
   io.opStrmIn.pipelined(StreamPipe.FULL) >> instrDecoder.io.rawInstrStream
@@ -164,8 +161,10 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
     io.SSDInstrIn.translateFrom(forkedFullInstrStream._1){(storageInstr, fullInstr) =>
       storageInstr.SHA3Hash    := fullInstr.SHA3Hash
       storageInstr.RefCount    := fullInstr.RefCount
+      storageInstr.SSDNodeIdx  := fullInstr.hostDataNodeIdx
       storageInstr.SSDLBAStart := fullInstr.SSDLBA
       storageInstr.SSDLBALen   := fullInstr.hostLBALen
+      storageInstr.nodeIdx     := fullInstr.nodeIdx
       when(fullInstr.opCode === DedupCoreOp.WRITE2FREE){
         storageInstr.opCode := (fullInstr.RefCount === 1) ? SSDOp.WRITE | SSDOp.UPDATEHEADER
       }.elsewhen(fullInstr.opCode === DedupCoreOp.ERASEREF){
@@ -179,14 +178,15 @@ class PageWriterSubSystem(conf: DedupConfig) extends Component {
     
     val fullInstrResQ = StreamFifo(CombinedFullInstr(conf), 4)
     fullInstrResQ.io.push  << forkedFullInstrStream._2
-    fullInstrResQ.io.flush := io.initEn
 
     io.res.translateFrom(fullInstrResQ.io.pop){(resp, fullInstr) =>
       resp.SHA3Hash      := fullInstr.SHA3Hash
       resp.RefCount      := fullInstr.RefCount
       resp.SSDLBA        := fullInstr.SSDLBA
+      resp.nodeIdx       := fullInstr.nodeIdx
       resp.hostLBAStart  := fullInstr.hostLBAStart
       resp.hostLBALen    := fullInstr.hostLBALen
+      resp.hostDataNodeIdx := fullInstr.hostDataNodeIdx
       resp.opCode        := fullInstr.opCode
 
       when(fullInstr.opCode === DedupCoreOp.WRITE2FREE){

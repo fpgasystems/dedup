@@ -5,29 +5,9 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.fsm._
 import spinal.lib.bus.amba4.axi._
+import routingtable.RoutedLookupInstr
+import routingtable.RoutedWriteBackLookupRes
 import util.StreamFork4
-
-// object HashTableOp extends SpinalEnum {
-//   val INSERT, LOOKUP, ERASE = newElement()
-// }
-
-// case class HashTabCmd (htConf: HashTableConfig) extends Bundle {
-//   val verb = HashTabVerb()
-//   val hashVal = Bits(htConf.hashValWidth bits)
-//   val isPostInst = Bool()
-// }
-
-case class HashTableLookupFSMInstr(htConf: HashTableConfig) extends Bundle{
-  val SHA3Hash = Bits(htConf.hashValWidth bits)
-  val opCode = DedupCoreOp()
-}
-
-case class HashTableLookupFSMRes (htConf: HashTableConfig) extends Bundle {
-  val SHA3Hash = Bits(htConf.hashValWidth bits)
-  val RefCount = UInt(htConf.ptrWidth bits)
-  val SSDLBA   = UInt(htConf.ptrWidth bits)
-  val opCode   = DedupCoreOp()
-}
 
 case class HashTableBucketMetaData (htConf: HashTableConfig) extends Bundle {
   // Block Addr = entry idx
@@ -65,38 +45,17 @@ case class HashTableEntryNoPadding (htConf: HashTableConfig) extends Bundle {
   val next     = UInt(htConf.ptrWidth bits)
 }
 
-// case class DRAMRdCmd(htConf: HashTableConfig) extends Bundle {
-//   val addr   = UInt(config.addressWidth bits)
-//   val id     = UInt(config.idWidth bits)
-//   val len    = UInt(8 bits)
-//   val size   = UInt(3 bits)
-//   val burst  = Bits(2 bits)
-//   val addr = UInt(64 bits)
-//   val id
-//   val nEntry = UInt(htConf.bucketOffsWidth bits)
-//   io.axiMem.ar.addr := rDRAMRdCmd.memOffs + cntAxiRdCmd * burstLen * io.axiConf.dataWidth/8
-//   io.axiMem.ar.id   := 0
-//   io.axiMem.ar.len  := burstLen-1
-//   io.axiMem.ar.size := log2Up(io.axiConf.dataWidth/8)
-//   io.axiMem.ar.setBurstINCR()
-//   io.axiMem.ar.valid := False
-// }
-
-// case class DRAMWrCmd(htConf: HashTableConfig) extends Bundle {
-//   val memOffs = UInt(64 bits) // hash entry offset in DRAM
-//   val ptrVal = UInt(htConf.ptrWidth bits) // page pointer in storage
-//   val hashVal = Bits(htConf.hashValWidth bits)
-// }
-
 // size = #entry inside
 //hashTableOffset = global memory offset of the hash table
 // index -> entry0 -> entry1 -> ......
-
-case class HashTableLookupFSMIO(htConf: HashTableConfig) extends Bundle {
+case class HashTableLookupFSMIO(conf: DedupConfig) extends Bundle {
+  val htConf      = conf.htConf
   val initEn      = in Bool()
+  val updateRoutingTableContent = in Bool()
+  val nodeIdx     = in UInt(conf.nodeIdxWidth bits)
   // execution results
-  val instrStrmIn = slave Stream(HashTableLookupFSMInstr(htConf))
-  val res         = master Stream(HashTableLookupFSMRes(htConf))
+  val instrStrmIn = slave Stream(RoutedLookupInstr(conf))
+  val res         = master Stream(RoutedWriteBackLookupRes(conf))
   // interface the lock manager
   val lockReq     = master Stream(FSMLockRequest(htConf))
   // interface to allocator
@@ -107,12 +66,12 @@ case class HashTableLookupFSMIO(htConf: HashTableConfig) extends Bundle {
   val axiMem      = master(Axi4(axiConf))
 }
 
-case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends Component {
-
-  val rFSMId = Reg(UInt(log2Up(htConf.sizeFSMArray) bits)) init U(FSMId) allowUnsetRegToAvoidLatch
-
-  val io = HashTableLookupFSMIO(htConf)
-
+case class HashTableLookupFSM (conf: DedupConfig, FSMId: Int = 0) extends Component {
+  val htConf   = conf.htConf
+  val io = HashTableLookupFSMIO(conf)
+  assert (htConf.bfOptimizedReconstruct == false, "Not a well-defined feature, should not be used")
+  val rFSMId    = Reg(UInt(log2Up(htConf.sizeFSMArray) bits)) init U(FSMId) allowUnsetRegToAvoidLatch
+  val rNodeIdx  = RegNextWhen(io.nodeIdx, io.updateRoutingTableContent, U(0))
   /** default status of strems */
   io.instrStrmIn.setBlocked()
   io.res.setIdle()
@@ -124,7 +83,7 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
   io.axiMem.writeRsp.setBlocked()
   io.axiMem.readCmd.setIdle()
 
-  val instr      = Reg(HashTableLookupFSMInstr(htConf))
+  val instr      = Reg(RoutedLookupInstr(conf))
   val idxBucket  = instr.SHA3Hash(htConf.idxBucketWidth-1 downto 0).asUInt // lsb as the bucket index
   val bfLookupIdx = (htConf.bfEnable) generate (Vec(UInt(htConf.mWidth bits), htConf.k))
   val bfLookupMask = (htConf.bfEnable) generate (Vec(Bits(htConf.m bits), htConf.k))
@@ -420,6 +379,15 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
           needMetaDataWriteBack      := False
           needCurrentEntryWriteBack  := True
           needPrevEntryWriteBack     := False
+
+          // check if optimized BF reconstruct is enabled
+          if (htConf.bfEnable && htConf.bfOptimizedReconstruct) {
+            when(currentEntry.next === 0){
+              // lookup exist(not FP), but we reach the last, we can reconstruct
+              bucketMetaData.bloomFilter := reconstructedBloomFilter
+              needMetaDataWriteBack      := True
+            }
+          }          
           goto(WRITE_BACK)
         }.otherwise{
           // new, insert
@@ -681,11 +649,14 @@ case class HashTableLookupFSM (htConf: HashTableConfig, FSMId: Int = 0) extends 
         lockReleased := True
       }
 
-      io.res.valid             := !resFired
-      io.res.payload.SHA3Hash  := currentEntry.SHA3Hash
-      io.res.payload.RefCount  := currentEntry.RefCount
-      io.res.payload.SSDLBA    := currentEntry.SSDLBA
-      io.res.payload.opCode    := instr.opCode
+      io.res.valid            := !resFired
+      // io.res.payload.SHA3Hash := currentEntry.SHA3Hash
+      // io.res.payload.opCode   := instr.opCode
+      io.res.payload.RefCount := currentEntry.RefCount
+      io.res.payload.SSDLBA   := currentEntry.SSDLBA
+      io.res.payload.nodeIdx  := rNodeIdx
+      io.res.payload.tag      := instr.tag
+      io.res.payload.dstNode  := instr.srcNode
       // acquire lock from lock manager
       when(io.res.fire){
         resFired := True

@@ -4,8 +4,17 @@ package hashtable
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axi._
+import routingtable.RoutedLookupInstr
+import routingtable.RoutedWriteBackLookupRes
 
-case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTableSize: BigInt = ((BigInt(1) << 27) + (BigInt(1) << 26)), expBucketSize: Int = 32, hashTableOffset: BigInt = (BigInt(1) << 30), bfEnable: Boolean = true) {
+case class HashTableConfig (hashValWidth: Int = 256, 
+                            ptrWidth: Int = 32, 
+                            hashTableSize: BigInt = ((BigInt(1) << 27) + (BigInt(1) << 26)), 
+                            expBucketSize: Int = 32, 
+                            hashTableOffset: BigInt = (BigInt(1) << 30), 
+                            bfEnable: Boolean = true,
+                            bfOptimizedReconstruct: Boolean = false,
+                            sizeFSMArray: Int = 8) {
   // Instr Decoder
   val readyQueueLogDepth = 7
   val waitingQueueLogDepth = 7
@@ -30,9 +39,6 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
   // Lookup FSM settings
   /** Hardware parameters (performance related) */
   val cmdQDepth = 4
-  
-  // lookup engine settings
-  val sizeFSMArray = 8
 
   // bloom filter config
   val mWidth = 5
@@ -43,65 +49,35 @@ case class HashTableConfig (hashValWidth: Int = 256, ptrWidth: Int = 32, hashTab
 case class HashTableSSIO(conf: DedupConfig) extends Bundle {
   val initEn       = in Bool () 
   val clearInitStatus = in Bool()
+  val updateRoutingTableContent = in Bool()
+  val nodeIdx      = in UInt(conf.nodeIdxWidth bits)
   val initDone     = out Bool ()
-  val opStrmIn     = slave Stream (Bits(conf.instrTotalWidth bits))
-  val pgStrmFrgmIn = slave Stream (Fragment(Bits(conf.wordSizeBit bits)))
-  val res          = master Stream (HashTableLookupFSMRes(conf.htConf))
+  val opStrmIn     = slave Stream (RoutedLookupInstr(conf))
+  val res          = master Stream (RoutedWriteBackLookupRes(conf))
   /** DRAM interface */
   val axiConf     = Axi4ConfigAlveo.u55cHBM
   val axiMem      = Vec(master(Axi4(axiConf)), conf.htConf.sizeFSMArray + 1)
 }
 
-class HashTableSubSystem(conf : DedupConfig) extends Component {
+case class HashTableSubSystem(conf : DedupConfig) extends Component {
   val io     = HashTableSSIO(conf)
 
   val htConf = conf.htConf
 
-  val sha3Grp   = new SHA3Group(conf.sha3Conf)
-
-  val SHA3ResQueue = StreamFifo(Bits(htConf.hashValWidth bits), 64)
-  
-  val instrDecoder = HashTableInstrDecoder(conf)
-
-  val decodedWaitingInstrQueue = StreamFifo(DecodedWaitingInstr(conf),  1 << htConf.waitingQueueLogDepth)
-
-  val decodedReadyInstrQueue = StreamFifo(DecodedReadyInstr(conf),  1 << htConf.readyQueueLogDepth)
-
-  val instrIssuer = HashTableInstrIssuer(conf)
-
-  val lookupEngine = HashTableLookupEngine(htConf)
+  val lookupEngine = HashTableLookupEngine(conf)
 
   val memAllocator = MemManager(htConf)
   // memAllocator.io.initEn := io.initEn
 
   io.initDone := lookupEngine.io.initDone
 
-  // SHA3 Group + SHA3 res Queue
-  sha3Grp.io.initEn := io.initEn
-  sha3Grp.io.frgmIn << io.pgStrmFrgmIn.pipelined(StreamPipe.FULL)
-
-  SHA3ResQueue.io.push  << sha3Grp.io.res.pipelined(StreamPipe.FULL)
-  SHA3ResQueue.io.flush := io.initEn
-
-  // decoder + decoded instr Queue
-  io.opStrmIn.pipelined(StreamPipe.FULL) >> instrDecoder.io.rawInstrStream
-  instrDecoder.io.readyInstrStream       >> decodedReadyInstrQueue.io.push
-  instrDecoder.io.waitingInstrStream     >> decodedWaitingInstrQueue.io.push
-
-  decodedReadyInstrQueue.io.flush    := io.initEn
-  decodedWaitingInstrQueue.io.flush  := io.initEn
-
-  // instr issuer and lookup Engine
-  instrIssuer.io.initEn              := io.initEn
-  instrIssuer.io.readyInstrStream    << decodedReadyInstrQueue.io.pop.pipelined(StreamPipe.FULL)
-  instrIssuer.io.waitingInstrStream  << decodedWaitingInstrQueue.io.pop.pipelined(StreamPipe.FULL)
-  instrIssuer.io.SHA3ResStream       << SHA3ResQueue.io.pop.pipelined(StreamPipe.FULL)
-
-  instrIssuer.io.instrIssueStream.pipelined(StreamPipe.FULL) >> lookupEngine.io.instrStrmIn
+  io.opStrmIn >> lookupEngine.io.instrStrmIn
 
   lookupEngine.io.initEn             := io.initEn
   lookupEngine.io.clearInitStatus    := io.clearInitStatus
   lookupEngine.io.res                >> io.res
+  lookupEngine.io.updateRoutingTableContent := io.updateRoutingTableContent
+  lookupEngine.io.nodeIdx            := io.nodeIdx
   // io.axiMem                          := lookupEngine.io.axiMem
   for (idx <- 0 until htConf.sizeFSMArray){
     lookupEngine.io.axiMem(idx) >> io.axiMem(idx)

@@ -8,33 +8,33 @@ object DedupCoreOp extends SpinalEnum(binarySequential) {
 }
 
 /* instr format: total 512 bit wide
-  WRITE2FREE: opcode, host LBA start, host LBA len
-  ERASEREF:   opcode, SSD LBA, CRC1, CRC2, CRC3, SHA3
-  READSSD:    opcode, SSD LBA start, SSD LBA len */
+  WRITE2FREE: opcode, host Data Node Id, host LBA start, host LBA len
+  ERASEREF:   opcode, SHA3
+  READSSD:    opcode, SHA3 */
 
 case class WRITE2FREEInstr (conf: DedupConfig) extends Bundle{
-  val hostLBALen = UInt(conf.LBAWidth bits)
-  val hostLBAStart = UInt(conf.LBAWidth bits)
-  val opCode = DedupCoreOp()
+  val hostLBALen      = UInt(conf.lbaWidth bits)
+  val hostLBAStart    = UInt(conf.lbaWidth bits)
+  val hostDataNodeIdx = UInt(conf.dataNodeIdxWidth bits)
+  val opCode          = DedupCoreOp()
 
   def decodeFromRawBits() : (WRITE2FREEInstr, Bits) => Unit = {
     (decoded, raw) => {
-      decoded.hostLBALen   assignFromBits raw(0, conf.LBAWidth bits)
-      decoded.hostLBAStart assignFromBits raw(conf.LBAWidth, conf.LBAWidth bits)
-      decoded.opCode       assignFromBits raw((conf.instrTotalWidth - 1) downto (conf.instrTotalWidth - DedupCoreOp().getBitsWidth))
+      decoded.hostLBALen      assignFromBits raw(0, conf.lbaWidth bits)
+      decoded.hostLBAStart    assignFromBits raw(conf.lbaWidth, conf.lbaWidth bits)
+      decoded.hostDataNodeIdx assignFromBits raw(2 * conf.lbaWidth, conf.dataNodeIdxWidth bits)
+      decoded.opCode          assignFromBits raw((conf.instrTotalWidth - 1) downto (conf.instrTotalWidth - DedupCoreOp().getBitsWidth))
     }
   }
 }
 
 case class ERASEREFInstr (conf: DedupConfig) extends Bundle{
   val SHA3Hash = Bits(256 bits)
-  val CRCHash = Vec(Bits(32 bits), 3) // this CRC is a legacy field, it is NOT used in ANY part of the code(except the deprecated ones)
   val opCode = DedupCoreOp()
 
   def decodeFromRawBits() : (ERASEREFInstr, Bits) => Unit = {
     (decoded, raw) => {
       decoded.SHA3Hash     :=             raw(0, 256 bits)
-      decoded.CRCHash      assignFromBits raw(256, 96 bits)
       decoded.opCode       assignFromBits raw((conf.instrTotalWidth - 1) downto (conf.instrTotalWidth - DedupCoreOp().getBitsWidth))
     }
   }
@@ -63,7 +63,7 @@ case class READSSDInstr (conf: DedupConfig) extends Bundle{
 // }
 
 // case class pageWriterInstr(conf: DedupConfig) extends Bundle{
-//   val LBALen = UInt(conf.LBAWidth bits)
-//   val LBA = UInt(conf.LBAWidth bits)
+//   val LBALen = UInt(conf.lbaWidth bits)
+//   val LBA = UInt(conf.lbaWidth bits)
 //   val opCode = DedupCoreOp()
 // }
