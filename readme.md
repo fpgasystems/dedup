@@ -19,7 +19,7 @@ sudo apt-get install verilator # Get verilator for simulation
 ```
 
 #### Install SBT
-1. (Recommended, easy and clean)By cs setup, in this way, cs(itself), scala, sbt will be installed under
+1. (Recommended, easy and clean) By cs setup, in this way, cs(itself), scala, sbt will be installed under
 `${HOME}/.local/share/coursier/bin/`, and this path will be added to `${HOME}/.profile`.
 From https://www.scala-lang.org/download/
 
@@ -48,8 +48,9 @@ sudo apt-get install sbt
 #### SpinalCrypto (Need to re-build with another Scala version)
 [Github Repo](https://github.com/SpinalHDL/SpinalCrypto)
 
-1. Choose correct Scala compiler versionin `SpinalCrypto/build.sbt`, L9 change to: scalaVersion := CryptoVersion.scalaCompilers(1),
-2. Build and publish SpinalCryto locally by `sbt publishLocal` under `SpinalCrypto/`. The lib path will be in `~/.ivy2/local/com.github.spinalhdl/`
+1. Clone repo somewhere and checkout commit 27e0ceb
+2. Choose correct Scala compiler version in `SpinalCrypto/build.sbt`, line 9 change to: scalaVersion := CryptoVersion.scalaCompilers(1),
+3. Build and publish SpinalCryto locally by `sbt publishLocal` under `SpinalCrypto/`. The lib path will be in `~/.ivy2/local/com.github.spinalhdl/`
 
 ### Usage
 #### Tests
